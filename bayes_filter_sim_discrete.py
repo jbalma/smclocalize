@@ -8,6 +8,8 @@ import itertools
 import math
 import sys
 
+output_directory = 'output/bayes_filter_sim_discrete/'
+
 # Define multi-dimensional version of np.random.choice()
 
 def rnd_choice_multi_dim(indices_array, probability_array):
@@ -249,8 +251,8 @@ for tck in ax.yaxis.get_major_ticks():
     tck.tick1On = False
     tck.tick2On = False
 
-fig.savefig('p_x_bar_x_previous.pdf')
-fig.savefig('p_x_bar_x_previous.png')
+fig.savefig(output_directory + 'p_x_bar_x_previous.pdf')
+fig.savefig(output_directory + 'p_x_bar_x_previous.png')
 plt.close(fig)
 
 # Analyze and visualizae P (y | x)
@@ -358,8 +360,8 @@ cbar_ax = fig.add_axes([0.72, 0.12, 0.03, 0.75])
 cb = fig.colorbar(pc, cax=cbar_ax)
 cb.set_label('P(measured distance | position)')
 
-fig.savefig('p_y_bar_x.pdf')
-fig.savefig('p_y_bar_x.png')
+fig.savefig(output_directory + 'p_y_bar_x.pdf')
+fig.savefig(output_directory + 'p_y_bar_x.png')
 plt.close(fig)
 
 # Generate simulated x data and y data
@@ -664,8 +666,8 @@ for tck in ax.yaxis.get_major_ticks():
     tck.tick1On = False
     tck.tick2On = False
 
-fig.savefig('p_x_0_bar_y_0.pdf')
-fig.savefig('p_x_0_bar_y_0.png')
+fig.savefig(output_directory + 'p_x_0_bar_y_0.pdf')
+fig.savefig(output_directory + 'p_x_0_bar_y_0.png')
 plt.close(fig)
 
 # Calculate posterior probability distribution of x for t > 0
@@ -847,8 +849,8 @@ for y_var_index in range(num_y_vars):
 	else:
 		ax.set_xticks([])
 
-fig.savefig('p_x_t_bar_y_t.pdf')
-fig.savefig('p_x_t_bar_y_t.png')
+fig.savefig(output_directory + 'p_x_t_bar_y_t.pdf')
+fig.savefig(output_directory + 'p_x_t_bar_y_t.png')
 plt.close(fig)
 
 # Generate animation of P(x(t)| y(t))
@@ -926,7 +928,7 @@ anim = animation.FuncAnimation(
 
 plt.rcParams['animation.ffmpeg_path'] = u'C:\\ffmpeg\\bin\\ffmpeg.exe'
 FFwriter = animation.FFMpegWriter(fps = 2)
-anim.save('p_x_t_bar_y_t.mp4', writer = FFwriter)
+anim.save(output_directory + 'p_x_t_bar_y_t.mp4', writer = FFwriter)
 
 # plt.show()
 plt.close(fig)
