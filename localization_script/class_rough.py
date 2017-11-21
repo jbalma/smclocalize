@@ -275,11 +275,25 @@ class SensorModel:
                                 np.tile(y_discrete_t[t_index], (num_particles,1)),
                                 np.tile(y_continuous_t[t_index], (num_particles,1)))
             log_particle_weights[t_index] = log_particle_weights[t_index]- misc.logsumexp(log_particle_weights[t_index])
-        self.log_particle_weights = log_particle_weights
-        return(self.log_particle_weights)
+            
+        x_mean_particle = np.average(particle_values, axis=1,
+                                     weights=np.repeat(np.exp(log_particle_weights),
+                                                       self.num_x_vars).reshape((num_timesteps, num_particles, self.num_x_vars)))
+        
+        x_squared_mean_particle = np.average(np.square(particle_values), 
+                                             axis=1,
+                                             weights=np.repeat(np.exp(log_particle_weights),
+                                                               self.num_x_vars).reshape((num_timesteps,
+                                                                         num_particles,
+                                                                         self.num_x_vars)))
+        
+        x_sd_particle = np.sqrt(np.abs(x_squared_mean_particle - np.square(x_mean_particle)))
+        self.x_estimate = (x_mean_particle, x_sd_particle)
         print'\nTime elapsed = {}'.format(time.clock()-time_start)
+        return(self.x_estimate)
+
         
-        
+#Just a few test statements below to make sure things are working as expected.
 
 test_model = SensorModel(3, 4, 20.0, 10.0)
 
@@ -295,6 +309,8 @@ test_model.sample_y_continuous_bar_x(np.tile(test_x_value, (1000, 1)))
 
 test_model.simulate_data()
 
-x, y_disc, y_cont = test_model.simulation_results
+x, y_disc, y_cont, t_steps = test_model.simulation_results
 
-test_model.sample_posterior()
+x_estimates = test_model.sample_posterior()
+
+x_est, sd_x_est = x_estimates
