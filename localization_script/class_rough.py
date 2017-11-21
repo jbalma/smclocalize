@@ -241,8 +241,45 @@ class SensorModel:
             y_discrete_t[t_index] = self.sample_y_discrete_bar_x(x_t[t_index])
             y_continuous_t[t_index] = self.sample_y_continuous_bar_x(x_t[t_index])
         
-        self.simulation_results = (x_t, y_discrete_t, y_continuous_t)
+        self.simulation_results = (x_t, y_discrete_t, y_continuous_t, num_timesteps)
         return(self.simulation_results)
+
+    def sample_posterior(self, num_particles = 10000, sensor_data = ()):
+        
+        if not sensor_data:
+            sensor_data = self.simulation_results
+        
+        x_t, y_discrete_t, y_continuous_t, num_timesteps = sensor_data
+        particle_values = np.zeros((num_timesteps, num_particles, self.num_x_vars), dtype = 'float')
+        log_particle_weights = np.zeros((num_timesteps, num_particles), dtype = 'float')
+        sampled_particle_indices = np.zeros((num_timesteps, num_particles), dtype = 'int')
+        
+        particle_values[0] = self.sample_x_initial(num_particles)
+        log_particle_weights[0] = self.log_f_y_bar_x(particle_values[0],
+                            np.tile(y_discrete_t[0], (num_particles,1)),
+                            np.tile(y_continuous_t[0], (num_particles,1)))
+        log_particle_weights[0] = log_particle_weights[0] - misc.logsumexp(log_particle_weights[0])
+        
+        sys.stdout.write('t_index =')
+        sys.stdout.flush()
+        time_start = time.clock()
+        for t_index in range(1, num_timesteps):
+            sys.stdout.write(' {}'.format(t_index))
+            sys.stdout.flush()
+            sampled_particle_indices[t_index - 1] = np.random.choice(num_particles,
+                                                                     size=num_particles,
+                                                                     p=np.exp(log_particle_weights[t_index - 1]))
+            particle_values[t_index] = self.sample_x_bar_x_prev(particle_values[t_index - 1,
+                           sampled_particle_indices[t_index - 1]])
+            log_particle_weights[t_index] = self.log_f_y_bar_x(particle_values[t_index],
+                                np.tile(y_discrete_t[t_index], (num_particles,1)),
+                                np.tile(y_continuous_t[t_index], (num_particles,1)))
+            log_particle_weights[t_index] = log_particle_weights[t_index]- misc.logsumexp(log_particle_weights[t_index])
+        self.log_particle_weights = log_particle_weights
+        return(self.log_particle_weights)
+        print'\nTime elapsed = {}'.format(time.clock()-time_start)
+        
+        
 
 test_model = SensorModel(3, 4, 20.0, 10.0)
 
@@ -260,3 +297,4 @@ test_model.simulate_data()
 
 x, y_disc, y_cont = test_model.simulation_results
 
+test_model.sample_posterior()
