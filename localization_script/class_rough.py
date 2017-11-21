@@ -164,7 +164,7 @@ class SensorModel:
             x_prev_stationary_sensors = x_prev[...,self.num_moving_sensors*self.num_dimensions:]
             position_guesses = np.random.normal(loc=np.tile(self.stationary_sensor_position_guesses.flatten(),
                                                             x_prev_stationary_sensors.shape[:-1] + (1,)),
-                                                scale=self.stationary_sensor_position_guess_error)
+                                                scale=self.stationary_position_guess_error)
             drifted_positions = np.random.normal(loc=x_prev_stationary_sensors,
                                                  scale=stationary_sensor_drift)
             stationary_sensor_positions = (position_guesses + drifted_positions)/2
@@ -225,7 +225,24 @@ class SensorModel:
         continuous_log_probability_densities[y_discrete == 1] = 0.0
         return np.sum(discrete_log_probabilities, axis=-1) + np.sum(continuous_log_probability_densities, axis=-1)
 
-
+    def simulate_data(self, num_timesteps = 100, timestep_size = 1.0):
+        t = np.zeros(num_timesteps, dtype='float')
+        x_t = np.zeros((num_timesteps, self.num_x_vars), dtype='float')
+        y_discrete_t = np.zeros((num_timesteps, self.num_y_discrete_vars), dtype='int')
+        y_continuous_t = np.zeros((num_timesteps, self.num_y_continuous_vars), dtype='float')
+        
+        x_t[0] = self.sample_x_initial()
+        y_discrete_t[0] = self.sample_y_discrete_bar_x(x_t[0])
+        y_continuous_t[0] = self.sample_y_continuous_bar_x(x_t[0])
+        
+        for t_index in range(1,num_timesteps):
+            t[t_index] = t[t_index - 1] + timestep_size
+            x_t[t_index] = self.sample_x_bar_x_prev(x_t[t_index - 1])
+            y_discrete_t[t_index] = self.sample_y_discrete_bar_x(x_t[t_index])
+            y_continuous_t[t_index] = self.sample_y_continuous_bar_x(x_t[t_index])
+        
+        self.simulation_results = (x_t, y_discrete_t, y_continuous_t)
+        return(self.simulation_results)
 
 test_model = SensorModel(3, 4, 20.0, 10.0)
 
@@ -238,4 +255,8 @@ test_x_value = test_model.sample_x_initial()
 test_model.sample_y_discrete_bar_x(np.tile(test_x_value, (1000, 1)))
 
 test_model.sample_y_continuous_bar_x(np.tile(test_x_value, (1000, 1)))
+
+test_model.simulate_data()
+
+x, y_disc, y_cont = test_model.simulation_results
 
