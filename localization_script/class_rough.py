@@ -95,7 +95,7 @@ class SensorModel:
         self.receive_probability_zero_distance = 1.0 # Value from real data is approximately 1.0
         self.receive_probability_reference_distance = 0.7 #Value from real data is approximately 0.7
         self.reference_distance = 20.0 # Value from real data is approximately 20.0
-        self.scale_factor = reference_distance/np.log(receive_probability_reference_distance/receive_probability_zero_distance)
+        self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.receive_probability_zero_distance)
 
     def sample_x_initial(self, num_samples = 1):
         if self.num_moving_sensors > 0:
@@ -161,7 +161,7 @@ class SensorModel:
         num_x_values = x.shape[0]
         return np.squeeze(np.delete(np.linalg.norm(np.subtract(np.tile(x.reshape((num_x_values, self.num_sensors, self.num_dimensions)),
                                                                        (1, self.num_sensors, 1)),
-                np.repeat(x.reshape((self.num_x_values,
+                np.repeat(x.reshape((num_x_values,
                                      self.num_sensors,
                                      self.num_dimensions)),
                 self.num_sensors,
@@ -172,8 +172,16 @@ class SensorModel:
     def ping_status_probabilities(self, distance):
         receive_probability=self.receive_probability_zero_distance*np.exp(distance/self.scale_factor)
         return np.stack((receive_probability, 1 - receive_probability), axis=0)
+    
+    def sample_y_discrete_bar_x(self, x):
+        return np.apply_along_axis(lambda p_array: np.random.choice(len(p_array), p=p_array),
+                                   axis=0,
+                                   arr=self.ping_status_probabilities(self.distances(x)))
 
 
+
+
+del test_model
 
 test_model = SensorModel(3, 4, 20.0, 10.0)
 
@@ -183,5 +191,5 @@ test_model.plot_x_initial_samples(1000)
 
 test_x_value = test_model.sample_x_initial()
 
-test_model.sample_x_bar_x_prev(np.tile(test_x_value, (1000, 1)))
+test_model.sample_y_discrete_bar_x(np.tile(test_x_value, (1000, 1)))
 
