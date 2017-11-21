@@ -18,6 +18,15 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from matplotlib import patches
 
+def left_truncnorm_logpdf(x, untruncated_mean, untruncated_std_dev, left_cutoff):
+    logf = np.array(np.subtract(stats.norm.logpdf(x, loc=untruncated_mean,
+                                                  scale=untruncated_std_dev),
+    np.log(1 - stats.norm.cdf(left_cutoff,
+                              loc=untruncated_mean,
+                              scale=untruncated_std_dev))))
+    logf[x < left_cutoff] = -np.inf
+    return logf
+
 def initialize_variables(num_moving_sensors, num_stationary_sensors):
     
     #Initialize variables
@@ -85,6 +94,9 @@ class SensorModel:
         
         self.room_size = np.array([room_width, room_height])
         
+        #Note that in subsequent iterations, we may want to
+        #actually estimate some of these parameters as part of the modeling process.
+        
         self.stationary_sensor_position_guesses = self.room_size*np.array([[0.5, 1.0],
                                                                            [0.5, 0.0],
                                                                            [0.0, 0.5],
@@ -96,6 +108,11 @@ class SensorModel:
         self.receive_probability_reference_distance = 0.7 #Value from real data is approximately 0.7
         self.reference_distance = 20.0 # Value from real data is approximately 20.0
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.receive_probability_zero_distance)
+        
+        self.rssi_untruncated_mean_intercept = -64.0 # Value for real data is approximately -64.0
+        self.rssi_untruncated_mean_slope = -20.0 # Value for real data is approximately -20.0
+        self.rssi_untruncated_std_dev = 9.0 # Value for real data is approximately 9.0
+        self.lower_rssi_cutoff = -82.0 # Value for real data is approximately -82.0
 
     def sample_x_initial(self, num_samples = 1):
         if self.num_moving_sensors > 0:
@@ -177,11 +194,38 @@ class SensorModel:
         return np.apply_along_axis(lambda p_array: np.random.choice(len(p_array), p=p_array),
                                    axis=0,
                                    arr=self.ping_status_probabilities(self.distances(x)))
+        
+    def rssi_untruncated_mean(self, distance):
+        return self.rssi_untruncated_mean_intercept + self.rssi_untruncated_mean_slope*np.log10(distance)
+    
+    def rssi_truncated_mean(self, distance):
+        return stats.truncnorm.stats(a=(self.lower_rssi_cutoff - self.rssi_untruncated_mean(distance))/self.rssi_untruncated_std_dev,
+                                     b=np.inf,
+                                     loc=self.rssi_untruncated_mean(distance),
+                                     scale=self.rssi_untruncated_std_dev,
+                                     moments='m')
+        
+    def sample_rssi(self, distance):
+        return stats.truncnorm.rvs(a=(self.lower_rssi_cutoff - self.rssi_untruncated_mean(distance))/self.rssi_untruncated_std_dev,
+                                   b=np.inf,
+                                   loc=self.rssi_untruncated_mean(distance),
+                                   scale=self.rssi_untruncated_std_dev)
+        
+    def sample_y_continuous_bar_x(self, x):
+        return self.sample_rssi(self.distances(x))
+    
+    def log_f_y_bar_x(self, x, y_discrete, y_continuous):
+        distances_x = self.distances(x)
+        discrete_log_probabilities = np.log(np.choose(y_discrete,
+                                                      self.ping_status_probabilities(distances_x)))
+        continuous_log_probability_densities = left_truncnorm_logpdf(y_continuous,
+                                                                     self.rssi_untruncated_mean(distances_x),
+                                                                     self.rssi_untruncated_std_dev,
+                                                                     self.lower_rssi_cutoff)
+        continuous_log_probability_densities[y_discrete == 1] = 0.0
+        return np.sum(discrete_log_probabilities, axis=-1) + np.sum(continuous_log_probability_densities, axis=-1)
 
 
-
-
-del test_model
 
 test_model = SensorModel(3, 4, 20.0, 10.0)
 
@@ -192,4 +236,6 @@ test_model.plot_x_initial_samples(1000)
 test_x_value = test_model.sample_x_initial()
 
 test_model.sample_y_discrete_bar_x(np.tile(test_x_value, (1000, 1)))
+
+test_model.sample_y_continuous_bar_x(np.tile(test_x_value, (1000, 1)))
 
