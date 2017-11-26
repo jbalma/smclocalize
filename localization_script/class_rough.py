@@ -83,7 +83,7 @@ def initialize_variables(num_moving_sensors, num_stationary_sensors):
 class SensorModel:
     
     def __init__(self, moving_sensors = 3, stationary_sensors = 4,
-                     room_width = 20.0, room_height = 10.0):
+                     room_width = 20.0, room_height = 10.0, stationary_sensor_positions = []):
         
         self.names, self.numbers = initialize_variables(moving_sensors,
                                                         stationary_sensors)
@@ -97,10 +97,27 @@ class SensorModel:
         #Note that in subsequent iterations, we may want to
         #actually estimate some of these parameters as part of the modeling process.
         
-        self.stationary_sensor_position_guesses = self.room_size*np.array([[0.5, 1.0],
-                                                                           [0.5, 0.0],
-                                                                           [0.0, 0.5],
-                                                                           [1.0, 0.5]])[0:self.num_stationary_sensors]
+        if len(stationary_sensor_positions) == 0:
+            assert stationary_sensors == 4 #We only have default positions for
+            #four stationary sensors. If positions aren't specified and this isn't
+            #the case, we throw an error.
+            self.stationary_sensor_position_guesses = self.room_size*np.array([[0.5, 1.0],
+                                                                               [0.5, 0.0],
+                                                                               [0.0, 0.5],
+                                                                               [1.0, 0.5]])
+        else:
+            #Stationary sensor positions must be a numpy array
+            assert type(stationary_sensor_positions) is np.ndarray
+            #There should be as many stationary positions as there are stationary sensors.
+            assert stationary_sensors == len(stationary_sensor_positions)
+            #All stationary sensor positions should be within the bounds of the room.
+            for (x, y), value in np.ndenumerate(stationary_sensor_positions):
+                assert (0 <= x <= room_width) and (0 <= y <= room_height)
+            #Assign to object variable if all conditions are met.
+            self.stationary_sensor_position_guesses = stationary_sensor_positions
+       
+        #These are constants at the moment. Potentially change to all caps to 
+        #reflect this?
         
         self.stationary_position_guess_error = 1.0
         
@@ -295,7 +312,7 @@ class SensorModel:
         
 #Just a few test statements below to make sure things are working as expected.
 
-test_model = SensorModel(3, 4, 20.0, 10.0)
+test_model = SensorModel(7, 4, 20.0, 10.0)
 
 x_initial_samples = test_model.sample_x_initial(1000)
 
@@ -314,3 +331,32 @@ x, y_disc, y_cont, t_steps = test_model.simulation_results
 x_estimates = test_model.sample_posterior()
 
 x_est, sd_x_est = x_estimates
+
+#Testing the new functionality of variable stationary sensors with positions
+#passed in as an argument to the constructor.
+stationary_sensor_pos = np.array([[0.0, 5.0],
+                                  [20.0, 5.0],
+                                  [10.0, 0.0],
+                                  [10.0, 10.0],
+                                  [20.0, 10.0]])
+
+test_model_2 = SensorModel(10, 5, 20.0, 10.0, stationary_sensor_pos)
+
+test_model_2.simulate_data()
+test_model_2.plot_x_initial_samples(1000)
+
+test_model_2.sample_posterior()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
