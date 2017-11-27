@@ -1,12 +1,14 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-Created on Tue Nov 21 09:23:02 2017
+Created on Sun Nov 26 05:12:02 2017
 
 @author: charles
 
 A class wrapper for the HMM localization model with sampling using a particle
 filter.
+
+This version 
 """
 
 import math
@@ -263,8 +265,13 @@ class SensorModel:
 
     def sample_posterior(self, num_particles = 10000, sensor_data = ()):
         
-        if not sensor_data:
-            sensor_data = self.simulation_results
+        if len(sensor_data) == 0:
+            try:
+                self.simulation_results
+            except NameError:
+                print "No simulation data exists."
+            else:
+                sensor_data = self.simulation_results
         
         x_t, y_discrete_t, y_continuous_t, num_timesteps = sensor_data
         particle_values = np.zeros((num_timesteps, num_particles, self.num_x_vars), dtype = 'float')
@@ -309,28 +316,63 @@ class SensorModel:
         print'\nTime elapsed = {}'.format(time.clock()-time_start)
         return(self.x_estimate)
 
+    def sample_initial_posterior(self, sensor_data, num_particles=10000):
+        y_discrete, y_continuous = sensor_data
+        particle_values = np.zeros((num_particles, self.num_x_vars), dtype = 'float')
+        log_particle_weights = np.zeros((num_particles), dtype = 'float')
         
-#Just a few test statements below to make sure things are working as expected.
-
-test_model = SensorModel(7, 4, 20.0, 10.0)
-
-x_initial_samples = test_model.sample_x_initial(1000)
-
-test_model.plot_x_initial_samples(1000)
-
-test_x_value = test_model.sample_x_initial()
-
-test_model.sample_y_discrete_bar_x(np.tile(test_x_value, (1000, 1)))
-
-test_model.sample_y_continuous_bar_x(np.tile(test_x_value, (1000, 1)))
-
-test_model.simulate_data()
-
-x, y_disc, y_cont, t_steps = test_model.simulation_results
-
-x_estimates = test_model.sample_posterior()
-
-x_est, sd_x_est = x_estimates
+        particle_values = self.sample_x_initial(num_particles)
+        log_particle_weights = self.log_f_y_bar_x(particle_values,
+                            np.tile(y_discrete, (num_particles,1)),
+                            np.tile(y_continuous, (num_particles,1)))
+        log_particle_weights = log_particle_weights - misc.logsumexp(log_particle_weights)
+        
+        particles = (particle_values, log_particle_weights)
+        
+        x_mean_particle = np.average(particle_values, axis=1,
+                                     weights=np.repeat(np.exp(log_particle_weights),
+                                                       self.num_x_vars).reshape((num_particles, self.num_x_vars)))
+        
+        x_squared_mean_particle = np.average(np.square(particle_values), 
+                                             axis=1,
+                                             weights=np.repeat(np.exp(log_particle_weights),
+                                                               self.num_x_vars).reshape((num_particles,
+                                                                              self.num_x_vars)))
+        
+        x_sd_particle = np.sqrt(np.abs(x_squared_mean_particle - np.square(x_mean_particle)))
+        x = (x_mean_particle, x_sd_particle)
+        return(x, particles)
+    
+    def update_posterior_sample(self, sensor_data, particles_prev):
+        y_discrete, y_continuous = sensor_data
+        particle_values_prev, log_particle_weights_prev = particles_prev
+        num_particles = len(particle_values_prev)
+        assert len(particle_values_prev) == len(log_particle_weights_prev)
+        sampled_particle_indices = np.zeros(num_particles, dtype = 'int')
+        sampled_particle_indices = np.random.choice(num_particles, size=num_particles,
+                                                    p=np.exp(log_particle_weights_prev))
+        particle_values = self.sample_x_bar_x_prev(particle_values_prev[sampled_particle_indices])
+        log_particle_weights = self.log_f_y_bar_x(particle_values,
+                                                      np.tile(y_discrete, (num_particles,1)),
+                                                      np.tile(y_continuous, (num_particles,1)))
+        log_particle_weights = log_particle_weights - misc.logsumexp(log_particle_weights)
+        
+        particles = (particle_values, log_particle_weights)
+            
+        x_mean_particle = np.average(particle_values, axis=1,
+                                     weights=np.repeat(np.exp(log_particle_weights),
+                                                       self.num_x_vars).reshape((num_particles, self.num_x_vars)))
+        
+        x_squared_mean_particle = np.average(np.square(particle_values), 
+                                             axis=1,
+                                             weights=np.repeat(np.exp(log_particle_weights),
+                                                               self.num_x_vars).reshape((num_particles,
+                                                                              self.num_x_vars)))
+        
+        x_sd_particle = np.sqrt(np.abs(x_squared_mean_particle - np.square(x_mean_particle)))
+        x = (x_mean_particle, x_sd_particle)
+        
+        return(x, particles)
 
 #Testing the new functionality of variable stationary sensors with positions
 #passed in as an argument to the constructor.
@@ -343,16 +385,23 @@ stationary_sensor_pos = np.array([[0.0, 5.0],
 test_model_2 = SensorModel(10, 5, 20.0, 10.0, stationary_sensor_pos)
 
 test_model_2.simulate_data()
-test_model_2.plot_x_initial_samples(1000)
+test_model_2.simulation_results
+
+x_t, y_discrete_t, y_continuous_t, num_timesteps = test_model_2.simulation_results
+
+x_t[0]
+y_discrete_t[0]
+y_continuous_t[0]
+
+y_discrete = y_discrete_t[1]
+y_continuous = y_continuous_t[1]
+
+sensor_data = (y_discrete, y_continuous)
+
+x, particles = test_model_2.sample_initial_posterior(sensor_data)
+
+x_1, particles_1 = test_model_2.update_posterior_sample(sensor_data, particles)
 
 test_model_2.sample_posterior()
-
-
-
-
-
-
-
-
 
 
