@@ -8,7 +8,12 @@ Created on Sun Nov 26 05:12:02 2017
 A class wrapper for the HMM localization model with sampling using a particle
 filter.
 
-This version 
+In this version, we can sample from the posterior iteratively (as new sensor data becomes available)
+
+A few notes on useage.
+
+
+
 """
 
 import math
@@ -136,13 +141,15 @@ class SensorModel:
     def sample_x_initial(self, num_samples = 1):
         if self.num_moving_sensors > 0:
             moving_sensors = np.random.uniform(high=np.tile(self.room_size, self.num_moving_sensors),
-                                               size=(num_samples, self.num_moving_sensors*self.num_dimensions))
+                                               size=(num_samples,
+                                                     self.num_moving_sensors*self.num_dimensions))
         else:
             moving_sensors = np.array([])
         if self.num_stationary_sensors > 0:
             stationary_sensors = np.random.normal(loc=self.stationary_sensor_position_guesses.flatten(),
                                                   scale=self.stationary_position_guess_error,
-                                                  size=(num_samples, self.num_stationary_sensors*self.num_dimensions))
+                                                  size=(num_samples,
+                                                        self.num_stationary_sensors*self.num_dimensions))
         else:
             stationary_sensors = np.array([])
         return np.squeeze(np.concatenate((moving_sensors, stationary_sensors), axis=1))
@@ -195,15 +202,30 @@ class SensorModel:
         if x.ndim == 1:
             x = np.expand_dims(x, 0)
         num_x_values = x.shape[0]
-        return np.squeeze(np.delete(np.linalg.norm(np.subtract(np.tile(x.reshape((num_x_values, self.num_sensors, self.num_dimensions)),
-                                                                       (1, self.num_sensors, 1)),
-                np.repeat(x.reshape((num_x_values,
-                                     self.num_sensors,
-                                     self.num_dimensions)),
-                self.num_sensors,
-                axis = 1)),
-                axis=2),
-                np.arange(self.num_sensors)*self.num_sensors + np.arange(self.num_sensors),1))
+        return np.squeeze(
+                    np.delete(
+                            np.linalg.norm(
+                                    np.subtract(
+                                            np.tile(
+                                                    x.reshape(
+                                                            (num_x_values,
+                                                             self.num_sensors,
+                                                             self.num_dimensions)
+                                                            ),
+                                                    (1, self.num_sensors, 1)
+                                                    ),
+                                            np.repeat(x.reshape((num_x_values,
+                                                                 self.num_sensors,
+                                                                 self.num_dimensions)
+                                                                ),
+                                                    self.num_sensors,
+                                                    axis = 1)
+                                                ),
+                                            axis=2
+                                            ),
+                                    np.arange(self.num_sensors) * self.num_sensors + np.arange(self.num_sensors), 1
+                                )
+                        )
 
     def ping_status_probabilities(self, distance):
         receive_probability=self.receive_probability_zero_distance*np.exp(distance/self.scale_factor)
@@ -374,6 +396,8 @@ class SensorModel:
         
         return(x, particles)
 
+#Now to test the functionality of the class.
+
 #Testing the new functionality of variable stationary sensors with positions
 #passed in as an argument to the constructor.
 stationary_sensor_pos = np.array([[0.0, 5.0],
@@ -382,26 +406,64 @@ stationary_sensor_pos = np.array([[0.0, 5.0],
                                   [10.0, 10.0],
                                   [20.0, 10.0]])
 
-test_model_2 = SensorModel(10, 5, 20.0, 10.0, stationary_sensor_pos)
+#Initializing model with 10 moving sensors, 5 stationary sensors, a room width
+#of 20.0, a room height of 10.0, and stationary sensor positions stationary_sensor_pos.
+test_model = SensorModel(10, 5, 20.0, 10.0, stationary_sensor_pos)
 
-test_model_2.simulate_data()
-test_model_2.simulation_results
+#Simulating some sensor data so we can pass it in and test the iterative posterior sampling.
+test_model.simulate_data()
 
-x_t, y_discrete_t, y_continuous_t, num_timesteps = test_model_2.simulation_results
+#Grabbing the various components of the simulated data.
+x_t, y_discrete_t, y_continuous_t, num_timesteps = test_model.simulation_results
 
-x_t[0]
-y_discrete_t[0]
-y_continuous_t[0]
+#The first time a model is run with sensor data, we need to use the sample_initial_posterior
+#method because we have to use the initial state model. The function returns
+#the estimates for the state and confidence intervals (x) and the particle data
+#(values & weights)
+x, particles = test_model.sample_initial_posterior((y_discrete_t[0], y_continuous_t[0]))
 
-y_discrete = y_discrete_t[1]
-y_continuous = y_continuous_t[1]
+#Now that the model has been initialized, we can update it. We have to pass in
+#the new sensor data, and the previous particle data.
+x_1, particles_1 = test_model.update_posterior_sample((y_discrete_t[1], y_continuous_t[1]),
+                                                      particles)
 
-sensor_data = (y_discrete, y_continuous)
 
-x, particles = test_model_2.sample_initial_posterior(sensor_data)
 
-x_1, particles_1 = test_model_2.update_posterior_sample(sensor_data, particles)
+"""
+When passing in sensor data, both the discrete and rssi data must be passed in.
+Each is a numpy array of dimension num_sensors^2 - num_sensors, since each
+sensor sends to and receives from every other sensor and not itself.
+We iterate through the moving sensors first in the indices, then the stationary
+sensors.
 
-test_model_2.sample_posterior()
+Let a_i,j be a signal from the ith sensor to the jth sensor and n be the total
+number of sensors. A sensor data array has elements listed in the order:
+    a_2,1 a_3,1 a_4,1 ... a_n,1
+    a_1,2 a_3,2 a_4,2 ... a_n,2
+    ...
+    a_1,n a_2,n a_3,n ... a_n-1,n
+"""
 
+
+
+#This is just junk for my own testing purposes.
+test_model.sample_posterior()
+
+sys.getsizeof(particles[0]) + sys.getsizeof(particles[1])
+
+x_init = test_model.sample_x_initial()
+
+x_init
+
+x_new = test_model.sample_x_bar_x_prev(x_init)
+
+test_model.sample_y_discrete_bar_x(x_init)
+
+x_init.reshape((x_init.shape[0], 15, 2))
+
+np.tile(x_init.reshape((1, 15, 2)), (1, 15, 1))
+
+np.repeat(x_init.reshape((1, 15, 2)), 15, axis = 1)
+
+np.arange(15) * 15 + np.arange(15)
 
