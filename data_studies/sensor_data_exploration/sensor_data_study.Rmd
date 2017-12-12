@@ -1,0 +1,217 @@
+---
+title: "Initial Sensor Data Exploration"
+author: "Charles Midwinter"
+date: "November 30, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(jsonlite)
+library(igraph)
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Reading in the sensor data
+
+I downloaded 2 hours of sensor data. Let's pull it in and take a look. To create a unique ID, the type & id parameters must be combined.
+
+```{r read_data}
+sensor_data <- fromJSON('./input_data/sensor_data.json') %>% as.data.frame()
+
+sensor_data <- sensor_data %>%
+  unite("loc_id", c("local_type", "local_id"), remove = FALSE) %>%
+  unite("rem_id", c("remote_type", "remote_id"), remove = FALSE)
+```
+
+## Distance estimate based on RSSI signal strength
+
+Let's see if we can learn anything about the average distance to the various other sensors. We'll define a function that takes in the RSSI signal and gives us back a distance estimate.
+
+```{r distance}
+rssi_to_dist <- function(rssi){
+  intercept = -64.0
+  slope = -20.0
+  return(
+    10 ^ ((rssi - intercept) / slope)
+  )
+}
+
+sensor_data <- sensor_data %>%
+  mutate(dist = rssi_to_dist(rssi),
+         time = ymd_hms(observed_at))
+```
+
+## Child 11060
+
+Let's pick a random child, and look at all his/her interactions. I'm going to pick child 11060, just because he/she appears in the initial sensor readings.
+
+First I'll quickly define a function that charts the time series for all of the pings received by a loc_id during the period.
+
+```{r plot_child}
+plot_sensor_ts <- function(sensor_data, selected_sensor, save_flag = FALSE){
+
+  distinct_loc_ids <- sensor_data %>%
+    distinct(loc_id)
+  
+  distinct_times <- sensor_data %>%
+    distinct(time)
+  
+  distinct_id_time <- expand.grid(loc_id = distinct_loc_ids$loc_id,
+                                  rem_id = distinct_loc_ids$loc_id,
+                                  time = distinct_times$time,
+                                  stringsAsFactors = FALSE)
+  
+  new_sensor_data <- left_join(distinct_id_time, sensor_data) %>%
+    arrange(remote_type)
+  
+  p <- ggplot(filter(new_sensor_data, loc_id == selected_sensor), aes(x = time, y = dist)) +
+    geom_line(color = 'blue') +
+    theme(axis.text.x=element_text(angle=90, hjust=1)) +
+    facet_wrap(~rem_id) +
+    ggtitle(paste(selected_sensor, " Received Ping Time Series"))
+
+  if(save_flag){
+    ggsave(filename = paste('./graphics/', selected_sensor, '_ts'), device = "pdf")
+  }
+  return(p)
+}
+```
+
+```{r child_11060, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "child_11060")
+```
+
+It's pretty noisy. It seems like there's probably a lot more information about proximity from the frequency of pings than there is from the strength of the rssi signal.
+
+#Let's try looking at it as a distribution instead.
+
+```{r dist_child, echo = FALSE, message = FALSE, warning = FALSE}
+ggplot(filter(sensor_data, loc_id == "child_11060"), aes(x = dist)) +
+  geom_histogram() +
+  ggtitle("child_11060 Received Ping Histograms") +
+  facet_wrap(~rem_id)
+```
+
+This looks a bit more informative, since now we have ping counts and distance information together. Are we seeing particular children with which child_11060 played? Particular materials, and an area near which the child interacted with those materials?
+
+## Node graph
+
+Let's try a social graph of the children and teachers. The nodes of the graph will be the children and teachers themselves. The edges we will weight according to the number of sensor pings between the children, the pings themselves will be weighted according to the estimated distance^-2 (an arbitrary choice).
+
+```{r node_graph}
+#Create a data frame for the vertices.
+people <- sensor_data %>% 
+  filter(local_type %in% c("child", "teacher"), remote_type == c("child", "teacher")) %>%
+  distinct(loc_id) %>%
+  rename(child = loc_id)
+
+#Create a data frame for the edges.
+interactions <- sensor_data %>%
+  filter(local_type %in% c("child", "teacher"), remote_type == c("child", "teacher")) %>%
+  group_by(loc_id, rem_id) %>%
+  summarise(pings = n(),
+            ping_weight = 1 / (mean(dist))^2) %>%
+  mutate(weight = pings * ping_weight) %>%
+  rename(to = loc_id, from = rem_id)
+
+#Define an igraph object with people as the vertices and the sum of their pings, weighted by inverse distance squared, as their edges.
+school_graph <- graph_from_data_frame(interactions, directed = FALSE, vertices = people)
+
+#Size each node according to its number of connections (pings), each of which is weighted by the inverse square of the estimated distance. Scale by 1/3rd so the nodes aren't so large that they overlap.
+sizes <- strength(school_graph) / 3
+
+#Draw the node graph.
+plot(school_graph,
+     vertex.size = sizes,
+     layout = layout_with_fr(school_graph, weights = interactions$weight),
+     vertex.label.cex = .5)
+```
+
+The chart isn't framed very nicely, but I'll deal with that later. A bit of explanation on the diagram. The nodes are sized acording to their degree (the sum of the number of in-coming and out-going connections from the node), and the layout is the result of the Fruchterman-Reingold (FR) algorithm. FR is a force layout approach, which attracts strongly connected nodes, and creates repulsive forces to push less strongly connected nodes outward. Learn more about [force-directed graph drawing here](https://en.wikipedia.org/wiki/Force-directed_graph_drawing).
+
+If we take this at face value, then child_47423 was either off on his/her own for most of the class, or had a malfunctioning sensor. A similar story for teacher_31986.
+
+There does seem to be a significant range of pings among the children, at least based on the sizes of the nodes. Let's look at the distribution to see if there are any identifiable patterns.
+
+## Ping Distribution
+
+```{r ping_distribution, echo = FALSE, message = FALSE, warning = FALSE}
+ping_dist <- sensor_data %>%
+  group_by(loc_id, local_type) %>%
+  summarise(pings = n()) %>%
+  arrange(pings)
+
+ggplot(ping_dist, aes(x = pings, fill = as.factor(local_type))) +
+  geom_histogram() +
+  facet_wrap(~local_type)
+
+kable((ping_dist %>% filter(local_type == "child")), caption = "Pings by child")
+```
+
+## Potential insights about the classroom
+
+### Child perspective
+
+There were two children with dramatically fewer pings than their peers, child_11062 & child 47423. Perhaps they came late or left early? Let's take a look at the time series of their pings.
+
+```{r child_11062_ts, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "child_11062")
+```
+
+child_11062 does appear either ot have left early, or perhaps the sensor got turned off about a third of the way through the period.
+
+```{r child_47423, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "child_47423")
+```
+
+A similar story for child_47423. Late arrival and early departure, or a sensor that cut out for significant chunks of the period.
+
+Now let's contrast that with child_11061, who actually had the most sensor pings of the children.
+
+```{r child_11061, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "child_11061")
+```
+
+Is child_11061 friends with child_62459? That's what the consistent, low-distance pings would seem to suggest. The child also seems to have spent a fair amount of time with teacher_5612, and in area_11. Let's take a look at child_62459 to see if the relationship is recorded reciprocally.
+
+```{r child_62459, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "child_62459")
+```
+
+There does indeed seem to be a reciprocal relationship recorded from child_62459's perspective. They apparently played together near area_11. Interesting that we don't see as much interaction with teacher_5612 from child_62459's perspective, though. Did they also both also have some contact early in the period with child_11060?
+
+### Area perspective
+
+area_11 seems like a happening place. Let's see what's going on in terms of its received pings.
+
+```{r area_11, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "area_11")
+```
+
+area_12 got a lot of pings (for an area, that is). Let's see what was happening there.
+
+```{r area_12, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "area_12")
+```
+
+```{r area_13, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "area_13")
+```
+
+```{r area_10, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "area_10")
+```
+
+```{r area_9, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "area_9")
+```
+
+```{r child_45422, echo = FALSE, message = FALSE, warning = FALSE}
+plot_sensor_ts(sensor_data, "child_47422")
+```
+
+##Validating assumptions about the system
+

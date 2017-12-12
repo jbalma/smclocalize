@@ -1,3 +1,5 @@
 .ipynb_checkpoints
 output
 notes.txt
+.Rproj.user
+*.json
