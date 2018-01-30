@@ -1,0 +1,8 @@
+name: sensor_localization
+dependencies:
+  - python=2.7
+  - "numpy>=1.14"
+  - "scipy>=1.0"
+  - "pandas>=0.22"
+  - "matplotlib>=2.1"
+  - "jupyter>=1.0.0"
