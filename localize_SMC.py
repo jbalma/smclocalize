@@ -2,6 +2,7 @@
 
 import numpy as np
 from scipy import special
+from scipy import stats
 
 class SMCModel(object):
 
@@ -52,7 +53,8 @@ class SensorModel(SMCModel):
         self,
         num_child_sensors, num_material_sensors, num_teacher_sensors, num_area_sensors,
         num_dimensions, room_corners,
-        x_bar_x_prev_sample, y_bar_x_sample, y_bar_x_log_pdf
+        moving_sensor_drift,
+        y_bar_x_sample, y_bar_x_log_pdf
     ):
         # Need to check dimensions and types of all arguments
         self.num_child_sensors = num_child_sensors
@@ -61,7 +63,7 @@ class SensorModel(SMCModel):
         self.num_area_sensors = num_area_sensors
         self.num_dimensions = num_dimensions
         self.room_corners = room_corners
-        self.x_bar_x_prev_sample = x_bar_x_prev_sample
+        self.moving_sensor_drift = moving_sensor_drift
         self.y_bar_x_sample = y_bar_x_sample
         self.y_bar_x_log_pdf = y_bar_x_log_pdf
 
@@ -134,3 +136,14 @@ class SensorModel(SMCModel):
             )
         )
         return x_discrete_initial_sample, x_continuous_initial_sample
+
+    # Define a function which generates samples of the current state given the previous state
+    def x_bar_x_prev_sample(self, x_discrete_prev, x_continuous_prev):
+        x_discrete_bar_x_prev_sample = np.array([])
+        x_continuous_bar_x_prev_sample = stats.truncnorm.rvs(
+            a=(np.tile(self.room_corners[0], self.num_moving_sensors) - x_continuous_prev)/self.moving_sensor_drift,
+            b=(np.tile(self.room_corners[1], self.num_moving_sensors) - x_continuous_prev)/self.moving_sensor_drift,
+            loc=x_continuous_prev,
+            scale=self.moving_sensor_drift
+        )
+        return x_discrete_bar_x_prev_sample, x_continuous_bar_x_prev_sample
