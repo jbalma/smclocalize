@@ -54,7 +54,9 @@ class SensorModel(SMCModel):
         num_child_sensors, num_material_sensors, num_teacher_sensors, num_area_sensors,
         num_dimensions, room_corners,
         moving_sensor_drift,
-        y_bar_x_sample, y_bar_x_log_pdf
+        fixed_sensor_positions,
+        ping_success_probabilities_function,
+        rssi_samples_function, rssi_log_pdf_function
     ):
         # Need to check dimensions and types of all arguments
         self.num_child_sensors = num_child_sensors
@@ -64,8 +66,10 @@ class SensorModel(SMCModel):
         self.num_dimensions = num_dimensions
         self.room_corners = room_corners
         self.moving_sensor_drift = moving_sensor_drift
-        self.y_bar_x_sample = y_bar_x_sample
-        self.y_bar_x_log_pdf = y_bar_x_log_pdf
+        self.fixed_sensor_positions = fixed_sensor_positions
+        self.ping_success_probabilities_function = ping_success_probabilities_function
+        self.rssi_samples_function = rssi_samples_function
+        self.rssi_log_pdf_function = rssi_log_pdf_function
 
         self.num_moving_sensors = self.num_child_sensors + self.num_material_sensors + self.num_teacher_sensors
         self.num_fixed_sensors = self.num_area_sensors
@@ -120,7 +124,7 @@ class SensorModel(SMCModel):
         return a[..., self.extract_x_variables_mask]
 
     # Define a function which uses the boolean mask defined above to extract and flatten y values from a larger data structure
-    def extract_y_variables(a):
+    def extract_y_variables(self, a):
         return a[..., self.extract_y_variables_mask]
 
     # Define a function which generates samples of the initial x state
@@ -147,3 +151,60 @@ class SensorModel(SMCModel):
             scale=self.moving_sensor_drift
         )
         return x_discrete_bar_x_prev_sample, x_continuous_bar_x_prev_sample
+
+    def sensor_positions(self, x_continuous):
+        return np.concatenate(
+            (x_continuous.reshape(x_continuous.shape[:-1] + (self.num_moving_sensors, self.num_dimensions)),
+            np.broadcast_to(self.fixed_sensor_positions, x_continuous.shape[:-1] + self.fixed_sensor_positions.shape)),
+            axis=-2
+        )
+
+    def distances(self, sensor_positions):
+        return self.extract_y_variables(
+            np.linalg.norm(
+                np.subtract(
+                    sensor_positions[...,np.newaxis,:,:],
+                    sensor_positions[...,:,np.newaxis,:]
+                ),
+                axis = -1
+            )
+        )
+
+    def ping_status_probabilities_matrix(self, distances):
+        probabilities = self.ping_success_probabilities_function(distances)
+        return np.stack((probabilities, 1 - probabilities), axis=-1)
+
+    def ping_status_samples(self, distances):
+        return np.apply_along_axis(
+            lambda p_array: np.random.choice(len(p_array), p=p_array),
+            axis=-1,
+            arr=self.ping_status_probabilities_matrix(distances)
+        )
+
+    def y_discrete_bar_x_sample(self, x_discrete, x_continuous):
+        return self.ping_status_samples(self.distances(self.sensor_positions(x_continuous)))
+
+    def y_continuous_bar_x_sample(self, x_discrete, x_continuous):
+        return self.rssi_samples_function(self.distances(self.sensor_positions(x_continuous)))
+
+    def y_bar_x_sample(self, x_discrete, x_continuous):
+        return self.y_discrete_bar_x_sample(x_discrete, x_continuous), self.y_continuous_bar_x_sample(x_discrete, x_continuous)
+
+    def y_bar_x_log_pdf(self, x_discrete, x_continuous, y_discrete, y_continuous):
+        distances_x = self.distances(self.sensor_positions(x_continuous))
+        ping_status_probabilities_matrix_x = self.ping_status_probabilities_matrix(distances_x)
+        discrete_log_probabilities = np.log(
+            np.choose(
+                y_discrete,
+                np.rollaxis(
+                    ping_status_probabilities_matrix_x,
+                    axis=-1
+                )
+            )
+        )
+        continuous_log_probability_densities = self.rssi_log_pdf_function(
+            y_continuous,
+            distances_x
+        )
+        continuous_log_probability_densities[y_discrete == 1] = 0.0
+        return np.sum(discrete_log_probabilities, axis=-1) + np.sum(continuous_log_probability_densities, axis=-1)
