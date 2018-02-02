@@ -154,73 +154,30 @@ class SensorModel(SMCModel):
         self.rssi_samples_function = rssi_samples_function
         self.rssi_log_pdf_function = rssi_log_pdf_function
 
-        self.num_moving_sensors = self.num_child_sensors + self.num_material_sensors + self.num_teacher_sensors
-        self.num_fixed_sensors = self.num_area_sensors
-        self.num_sensors = self.num_moving_sensors + self.num_fixed_sensors
-
-        # Define a Boolean mask which helps us extract and flatten X values from
-        # an array representing the positions of all sensors
-
-        # Start with an array that has a row for every sensor and a column for every spatial dimension
-        self.extract_x_variables_mask = np.full((self.num_sensors, self.num_dimensions), True)
-        # We don't track the positions of fixed sensors
-        self.extract_x_variables_mask[self.num_moving_sensors:,:] = False
-
-        # Define the number of discrete and continuous x variables using this mask
-        self.num_x_discrete_vars = 0
-        self.num_x_continous_vars = np.sum(self.extract_x_variables_mask)
-
-        # Define a Boolean mask which help us extract and flatten Y values from
-        # an array representing every pairwise combination of sensors
-
-        # Start with an array that has every pairwise combination of sensors
-        self.extract_y_variables_mask = np.full((self.num_sensors, self.num_sensors), True)
-        # Sensors don't send pings to themselves
-        np.fill_diagonal(self.extract_y_variables_mask, False)
-        # We don't store pings from material sensors to other material sensors
-        self.extract_y_variables_mask[
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)
-        ] = False
-        # We don't store pings from teacher sensors to other teacher sensors
-        self.extract_y_variables_mask[
-            (self.num_child_sensors + self.num_material_sensors):self.num_moving_sensors,
-            (self.num_child_sensors + self.num_material_sensors):self.num_moving_sensors
-        ] = False
-        # We don't store pings from area sensors to other area sensors
-        self.extract_y_variables_mask[
-            self.num_moving_sensors:,
-            self.num_moving_sensors:
-        ] = False
-        # We don't store pings from material sensors to area sensors (and vice versa)
-        self.extract_y_variables_mask[
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
-            self.num_moving_sensors:
-        ] = False
-        self.extract_y_variables_mask[
-            self.num_moving_sensors:,
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)
-        ] = False
-
-        # Define the number of discrete and continuous Y variables using this mask
-        self.num_y_discrete_vars = np.sum(self.extract_y_variables_mask)
-        self.num_y_continous_vars = np.sum(self.extract_y_variables_mask)
-
-    # Define a function which uses the Boolean mask defined above to extract and
-    # flatten X values from a larger data structure
-    def extract_x_variables(self, a):
-        return a[..., self.extract_x_variables_mask]
-
-    # Define a function which uses the Boolean mask defined above to extract and
-    # flatten Y values from a larger data structure
-    def extract_y_variables(self, a):
-        return a[..., self.extract_y_variables_mask]
+        # Create the variable structure based on the number of each type of
+        # sensor
+        self.variable_structure = SensorVariableStructure(
+            num_child_sensors,
+            num_material_sensors,
+            num_teacher_sensors,
+            num_area_sensors,
+            num_dimensions
+        )
+        # Pull the number of each type of variable from the variable structure
+        # object
+        self.num_x_discrete_vars = self.variable_structure.num_x_discrete_vars
+        self.num_x_continuous_vars = self.variable_structure.num_x_continuous_vars
+        self.num_y_discrete_vars = self.variable_structure.num_y_discrete_vars
+        self.num_y_continuous_vars = self.variable_structure.num_y_continuous_vars
+        self.num_moving_sensors = self.variable_structure.num_moving_sensors
+        self.num_fixed_sensors = self.variable_structure.num_fixed_sensors
+        self.num_sensors = self.variable_structure.num_sensors
 
     # Define a function which generates samples of the initial X state
     def x_initial_sample(self, num_samples=1):
         x_discrete_initial_sample = np.tile(np.array([]), (num_samples, 1))
         x_continuous_initial_sample = np.squeeze(
-            self.extract_x_variables(
+            self.variable_structure.extract_x_variables(
                 np.random.uniform(
                     low = np.tile(self.room_corners[0], (self.num_sensors, 1)),
                     high = np.tile(self.room_corners[1], (self.num_sensors, 1)),
@@ -255,7 +212,7 @@ class SensorModel(SMCModel):
     # sensors and returns a vector of inter-sensor distances corresponding to
     # the Y variables
     def distances(self, sensor_positions):
-        return self.extract_y_variables(
+        return self.variable_structure.extract_y_variables(
             np.linalg.norm(
                 np.subtract(
                     sensor_positions[...,np.newaxis,:,:],
@@ -317,3 +274,82 @@ class SensorModel(SMCModel):
         )
         continuous_log_probability_densities[y_discrete == 1] = 0.0
         return np.sum(discrete_log_probabilities, axis=-1) + np.sum(continuous_log_probability_densities, axis=-1)
+
+# Define a class which defines an X and Y variable structure based on the number
+# of each type of sensor
+class SensorVariableStructure(object):
+
+    # We only need to provide this object with the number of each type of sensor
+    def __init__(
+        self,
+        num_child_sensors, num_material_sensors, num_teacher_sensors, num_area_sensors,
+        num_dimensions
+    ):
+        # Need to check dimensions and types of all arguments
+        self.num_child_sensors = num_child_sensors
+        self.num_material_sensors = num_material_sensors
+        self.num_teacher_sensors = num_teacher_sensors
+        self.num_area_sensors = num_area_sensors
+        self.num_dimensions = num_dimensions
+
+        self.num_moving_sensors = self.num_child_sensors + self.num_material_sensors + self.num_teacher_sensors
+        self.num_fixed_sensors = self.num_area_sensors
+        self.num_sensors = self.num_moving_sensors + self.num_fixed_sensors
+
+        # Define a Boolean mask which helps us extract and flatten X values from
+        # an array representing the positions of all sensors
+
+        # Start with an array that has a row for every sensor and a column for every spatial dimension
+        self.extract_x_variables_mask = np.full((self.num_sensors, self.num_dimensions), True)
+        # We don't track the positions of fixed sensors
+        self.extract_x_variables_mask[self.num_moving_sensors:,:] = False
+
+        # Define the number of discrete and continuous x variables using this mask
+        self.num_x_discrete_vars = 0
+        self.num_x_continuous_vars = np.sum(self.extract_x_variables_mask)
+
+        # Define a Boolean mask which help us extract and flatten Y values from
+        # an array representing every pairwise combination of sensors
+
+        # Start with an array that has every pairwise combination of sensors
+        self.extract_y_variables_mask = np.full((self.num_sensors, self.num_sensors), True)
+        # Sensors don't send pings to themselves
+        np.fill_diagonal(self.extract_y_variables_mask, False)
+        # We don't store pings from material sensors to other material sensors
+        self.extract_y_variables_mask[
+            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
+            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)
+        ] = False
+        # We don't store pings from teacher sensors to other teacher sensors
+        self.extract_y_variables_mask[
+            (self.num_child_sensors + self.num_material_sensors):self.num_moving_sensors,
+            (self.num_child_sensors + self.num_material_sensors):self.num_moving_sensors
+        ] = False
+        # We don't store pings from area sensors to other area sensors
+        self.extract_y_variables_mask[
+            self.num_moving_sensors:,
+            self.num_moving_sensors:
+        ] = False
+        # We don't store pings from material sensors to area sensors (and vice versa)
+        self.extract_y_variables_mask[
+            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
+            self.num_moving_sensors:
+        ] = False
+        self.extract_y_variables_mask[
+            self.num_moving_sensors:,
+            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)
+        ] = False
+
+        # Define the number of discrete and continuous Y variables using this mask
+        self.num_y_discrete_vars = np.sum(self.extract_y_variables_mask)
+        self.num_y_continuous_vars = np.sum(self.extract_y_variables_mask)
+
+    # Define a function which uses the Boolean mask defined above to extract and
+    # flatten X values from a larger data structure
+    def extract_x_variables(self, a):
+        return a[..., self.extract_x_variables_mask]
+
+    # Define a function which uses the Boolean mask defined above to extract and
+    # flatten Y values from a larger data structure
+    def extract_y_variables(self, a):
+        return a[..., self.extract_y_variables_mask]
