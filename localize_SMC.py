@@ -135,18 +135,14 @@ class SensorModel(SMCModel):
     # which generates RSSI samples, and an RSSI probability density function
     def __init__(
         self,
-        num_child_sensors, num_material_sensors, num_teacher_sensors, num_area_sensors,
-        num_dimensions, room_corners, fixed_sensor_positions,
+        sensor_variable_structure,
+        room_corners, fixed_sensor_positions,
         moving_sensor_drift,
         ping_success_probability_function,
         rssi_samples_function, rssi_log_pdf_function
     ):
         # Need to check dimensions and types of all arguments
-        self.num_child_sensors = num_child_sensors
-        self.num_material_sensors = num_material_sensors
-        self.num_teacher_sensors = num_teacher_sensors
-        self.num_area_sensors = num_area_sensors
-        self.num_dimensions = num_dimensions
+        self.sensor_variable_structure = sensor_variable_structure
         self.room_corners = room_corners
         self.moving_sensor_drift = moving_sensor_drift
         self.fixed_sensor_positions = fixed_sensor_positions
@@ -154,30 +150,24 @@ class SensorModel(SMCModel):
         self.rssi_samples_function = rssi_samples_function
         self.rssi_log_pdf_function = rssi_log_pdf_function
 
-        # Create the variable structure based on the number of each type of
-        # sensor
-        self.variable_structure = SensorVariableStructure(
-            num_child_sensors,
-            num_material_sensors,
-            num_teacher_sensors,
-            num_area_sensors,
-            num_dimensions
-        )
-        # Pull the number of each type of variable from the variable structure
-        # object
-        self.num_x_discrete_vars = self.variable_structure.num_x_discrete_vars
-        self.num_x_continuous_vars = self.variable_structure.num_x_continuous_vars
-        self.num_y_discrete_vars = self.variable_structure.num_y_discrete_vars
-        self.num_y_continuous_vars = self.variable_structure.num_y_continuous_vars
-        self.num_moving_sensors = self.variable_structure.num_moving_sensors
-        self.num_fixed_sensors = self.variable_structure.num_fixed_sensors
-        self.num_sensors = self.variable_structure.num_sensors
+        self.num_child_sensors = self.sensor_variable_structure.num_child_sensors
+        self.num_material_sensors = self.sensor_variable_structure.num_material_sensors
+        self.num_teacher_sensors = self.sensor_variable_structure.num_teacher_sensors
+        self.num_area_sensors = self.sensor_variable_structure.num_area_sensors
+        self.num_dimensions = self.sensor_variable_structure.num_dimensions
+        self.num_x_discrete_vars = self.sensor_variable_structure.num_x_discrete_vars
+        self.num_x_continuous_vars = self.sensor_variable_structure.num_x_continuous_vars
+        self.num_y_discrete_vars = self.sensor_variable_structure.num_y_discrete_vars
+        self.num_y_continuous_vars = self.sensor_variable_structure.num_y_continuous_vars
+        self.num_moving_sensors = self.sensor_variable_structure.num_moving_sensors
+        self.num_fixed_sensors = self.sensor_variable_structure.num_fixed_sensors
+        self.num_sensors = self.sensor_variable_structure.num_sensors
 
     # Define a function which generates samples of the initial X state
     def x_initial_sample(self, num_samples=1):
         x_discrete_initial_sample = np.tile(np.array([]), (num_samples, 1))
         x_continuous_initial_sample = np.squeeze(
-            self.variable_structure.extract_x_variables(
+            self.sensor_variable_structure.extract_x_variables(
                 np.random.uniform(
                     low = np.tile(self.room_corners[0], (self.num_sensors, 1)),
                     high = np.tile(self.room_corners[1], (self.num_sensors, 1)),
@@ -212,7 +202,7 @@ class SensorModel(SMCModel):
     # sensors and returns a vector of inter-sensor distances corresponding to
     # the Y variables
     def distances(self, sensor_positions):
-        return self.variable_structure.extract_y_variables(
+        return self.sensor_variable_structure.extract_y_variables(
             np.linalg.norm(
                 np.subtract(
                     sensor_positions[...,np.newaxis,:,:],
@@ -282,15 +272,20 @@ class SensorVariableStructure(object):
     # We only need to provide this object with the number of each type of sensor
     def __init__(
         self,
-        num_child_sensors, num_material_sensors, num_teacher_sensors, num_area_sensors,
-        num_dimensions
+        child_entity_ids, material_entity_ids, teacher_entity_ids, area_entity_ids,
+        num_dimensions = 2
     ):
         # Need to check dimensions and types of all arguments
-        self.num_child_sensors = num_child_sensors
-        self.num_material_sensors = num_material_sensors
-        self.num_teacher_sensors = num_teacher_sensors
-        self.num_area_sensors = num_area_sensors
+        self.child_entity_ids = child_entity_ids
+        self.material_entity_ids = material_entity_ids
+        self.teacher_entity_ids = teacher_entity_ids
+        self.area_entity_ids = area_entity_ids
         self.num_dimensions = num_dimensions
+
+        self.num_child_sensors = len(child_entity_ids)
+        self.num_material_sensors = len(material_entity_ids)
+        self.num_teacher_sensors = len(teacher_entity_ids)
+        self.num_area_sensors = len(area_entity_ids)
 
         self.num_moving_sensors = self.num_child_sensors + self.num_material_sensors + self.num_teacher_sensors
         self.num_fixed_sensors = self.num_area_sensors
