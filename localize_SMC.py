@@ -21,6 +21,10 @@ class SensorVariableStructure(object):
         self.area_entity_ids = area_entity_ids
         self.num_dimensions = num_dimensions
 
+        self.moving_entity_ids = child_entity_ids + material_entity_ids + teacher_entity_ids
+        self.fixed_entity_ids = area_entity_ids
+        self.entity_ids = self.moving_entity_ids + self.fixed_entity_ids
+
         self.num_child_sensors = len(child_entity_ids)
         self.num_material_sensors = len(material_entity_ids)
         self.num_teacher_sensors = len(teacher_entity_ids)
