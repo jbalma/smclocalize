@@ -119,9 +119,22 @@ class SMCModel(object):
 
     # Define a function which generates an initial set of X particles along with
     # their weights
-    def generate_initial_particles(self, num_particles = 1000):
+    def generate_initial_particles(
+        self,
+        y_discrete_initial,
+        y_continuous_initial,
+        num_particles = 1000
+    ):
         x_discrete_particles_initial, x_continuous_particles_initial = self.x_initial_sample(num_particles)
-        log_weights_initial = np.repeat(np.log(1.0/num_particles), num_particles)
+        # Assign weights to the new particles using the observation function
+        log_weights_initial = self.y_bar_x_log_pdf(
+            x_discrete_particles_initial,
+            x_continuous_particles_initial,
+            np.tile(y_discrete_initial, (num_particles, 1)),
+            np.tile(y_continuous_initial, (num_particles, 1))
+        )
+        # Normalize the weights
+        log_weights_initial = log_weights_initial - special.logsumexp(log_weights_initial)
         return x_discrete_particles_initial, x_continuous_particles_initial, log_weights_initial
 
     # Define a function which takes a set of particles and weights from the
@@ -189,16 +202,12 @@ class SMCModel(object):
             dtype='int'
         )
         # Generate an initial set of X particles
-        x_discrete_particles_initial, x_continuous_particles_initial, log_weights_initial = self.generate_initial_particles(num_particles)
-        # Generate the first step in the X particle trajectory based on the
-        # first Y value
-        x_discrete_particles_trajectory[0], x_continuous_particles_trajectory[0], log_weights_trajectory[0], ancestors_trajectory[0] = self.generate_next_particles(
-            x_discrete_particles_initial,
-            x_continuous_particles_initial,
-            log_weights_initial,
+        x_discrete_particles_trajectory[0], x_continuous_particles_trajectory[0], log_weights_trajectory[0] = self.generate_initial_particles(
             y_discrete_trajectory[0],
-            y_continuous_trajectory[0]
+            y_continuous_trajectory[0],
+            num_particles
         )
+        # We should probably populate ancestors_trajectory[0] with NA's
         # Generate the rest of the X particle trajectory by stepping through the
         # rest of the Y values
         for i in range(1, num_timesteps):
