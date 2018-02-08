@@ -264,6 +264,44 @@ class SMCModel(object):
             )
         return x_discrete_particles_trajectory, x_continuous_particles_trajectory, log_weights_trajectory, ancestors_trajectory
 
+    def generate_initial_simulation_timestep(
+        self,
+        t_initial
+    ):
+        x_discrete_initial, x_continuous_initial = self.x_initial_sample(1, t_initial)
+        y_discrete_initial, y_continuous_initial = self.y_bar_x_sample(x_discrete_initial, x_continuous_initial, t_initial)
+        return x_discrete_initial, x_continuous_initial, y_discrete_initial, y_continuous_initial
+
+    def generate_next_simulation_timestep(
+        self,
+        x_discrete_previous,
+        x_continuous_previous,
+        t_previous,
+        t
+    ):
+        x_discrete, x_continuous = self.x_bar_x_prev_sample(x_discrete_previous, x_continuous_previous, t_previous, t)
+        y_discrete, y_continuous = self.y_bar_x_sample(x_discrete_previous, x_continuous_previous, t)
+        return x_discrete, x_continuous, y_discrete, y_continuous
+
+    def generate_simulation_trajectory(
+        self,
+        t_trajectory
+    ):
+        num_timesteps_trajectory = len(t_trajectory)
+        x_discrete_trajectory = np.zeros((num_timesteps_trajectory, self.num_x_discrete_vars), dtype='int')
+        x_continuous_trajectory = np.zeros((num_timesteps_trajectory, self.num_x_continuous_vars), dtype='float')
+        y_discrete_trajectory = np.zeros((num_timesteps_trajectory, self.num_y_discrete_vars), dtype='int')
+        y_continuous_trajectory = np.zeros((num_timesteps_trajectory, self.num_y_continuous_vars), dtype='float')
+        x_discrete_trajectory[0], x_continuous_trajectory[0], y_discrete_trajectory[0], y_continuous_trajectory[0] = self.generate_initial_simulation_timestep(t_trajectory[0])
+        for t_index in range(1, num_timesteps_trajectory):
+            x_discrete_trajectory[t_index], x_continuous_trajectory[t_index], y_discrete_trajectory[t_index], y_continuous_trajectory[t_index] = self.generate_next_simulation_timestep(
+                x_discrete_trajectory[t_index - 1],
+                x_continuous_trajectory[t_index - 1],
+                t_trajectory[t_index - 1],
+                t_trajectory[t_index])
+        return x_discrete_trajectory, x_continuous_trajectory, y_discrete_trajectory, y_continuous_trajectory
+
+
 
 # Define a class based on the generic sequential Monte Carlo model class which
 # represents an instance of our particular sensor model
@@ -303,6 +341,11 @@ class SensorModel(SMCModel):
         self.rssi_untruncated_mean_slope = rssi_untruncated_mean_slope
         self.rssi_untruncated_std_dev = rssi_untruncated_std_dev
         self.lower_rssi_cutoff = lower_rssi_cutoff
+
+        self.num_x_discrete_vars = self.sensor_variable_structure.num_x_discrete_vars
+        self.num_x_continuous_vars = self.sensor_variable_structure.num_x_continuous_vars
+        self.num_y_discrete_vars = self.sensor_variable_structure.num_y_discrete_vars
+        self.num_y_continuous_vars = self.sensor_variable_structure.num_y_continuous_vars
 
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
 
