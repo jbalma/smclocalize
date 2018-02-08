@@ -245,20 +245,31 @@ class SensorModel(SMCModel):
     def __init__(
         self,
         sensor_variable_structure,
-        room_corners, fixed_sensor_positions,
-        moving_sensor_drift_reference_time, reference_time,
-        ping_success_probability_function,
-        rssi_samples_function, rssi_log_pdf_function
+        room_corners,
+        fixed_sensor_positions,
+        moving_sensor_drift_reference = 1.0,
+        reference_time_delta = np.timedelta64(10, 's'),
+        ping_success_probability_zero_distance = 1.0,
+        receive_probability_reference_distance = 0.135,
+        reference_distance = 10.0,
+        rssi_untruncated_mean_intercept = -69.18,
+        rssi_untruncated_mean_slope = -20.0,
+        rssi_untruncated_std_dev = 5.70,
+        lower_rssi_cutoff = -96.0001
     ):
         # Need to check dimensions and types of all arguments
         self.sensor_variable_structure = sensor_variable_structure
         self.room_corners = room_corners
-        self.moving_sensor_drift_reference_time = moving_sensor_drift_reference_time
-        self.reference_time = reference_time
         self.fixed_sensor_positions = fixed_sensor_positions
-        self.ping_success_probability_function = ping_success_probability_function
-        self.rssi_samples_function = rssi_samples_function
-        self.rssi_log_pdf_function = rssi_log_pdf_function
+        self.moving_sensor_drift_reference = moving_sensor_drift_reference
+        self.reference_time_delta = reference_time_delta
+        self.ping_success_probability_zero_distance = ping_success_probability_zero_distance
+        self.receive_probability_reference_distance = receive_probability_reference_distance
+        self.reference_distance = reference_distance
+        self.rssi_untruncated_mean_intercept = rssi_untruncated_mean_intercept
+        self.rssi_untruncated_mean_slope = rssi_untruncated_mean_slope
+        self.rssi_untruncated_std_dev = rssi_untruncated_std_dev
+        self.lower_rssi_cutoff = lower_rssi_cutoff
 
         self.num_child_sensors = self.sensor_variable_structure.num_child_sensors
         self.num_material_sensors = self.sensor_variable_structure.num_material_sensors
@@ -272,6 +283,8 @@ class SensorModel(SMCModel):
         self.num_moving_sensors = self.sensor_variable_structure.num_moving_sensors
         self.num_fixed_sensors = self.sensor_variable_structure.num_fixed_sensors
         self.num_sensors = self.sensor_variable_structure.num_sensors
+
+        self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
 
     # Define a function which generates samples of the initial X state
     def x_initial_sample(self, num_samples=1, t = np.nan):
@@ -290,7 +303,7 @@ class SensorModel(SMCModel):
     # Define a function which generates a sample of the current X state given the
     # previous X state
     def x_bar_x_prev_sample(self, x_discrete_prev, x_continuous_prev, t_prev = np.nan, t = np.nan):
-        moving_sensor_drift = self.moving_sensor_drift_reference_time*np.sqrt(((t - t_prev)/np.timedelta64(1, 's'))/self.reference_time)
+        moving_sensor_drift = self.moving_sensor_drift_reference*np.sqrt((t - t_prev)/self.reference_time_delta)
         x_discrete_bar_x_prev_sample = np.array([])
         x_continuous_bar_x_prev_sample = stats.truncnorm.rvs(
             a = (np.tile(self.room_corners[0], self.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
@@ -323,11 +336,14 @@ class SensorModel(SMCModel):
             )
         )
 
+    def ping_success_probability(self, distances):
+        return self.ping_success_probability_zero_distance*np.exp(distances/self.scale_factor)
+
     # Define a function which takes a vector of inter-sensor distances
     # corresponding to the Y variables and returns a corresponding array of
     # ping success probabilities
     def ping_success_probabilities_array(self, distances):
-        probabilities = self.ping_success_probability_function(distances)
+        probabilities = self.ping_success_probability(distances)
         return np.stack((probabilities, 1 - probabilities), axis=-1)
 
     # Define a function which takes a vector of inter-sensor distances
@@ -345,10 +361,42 @@ class SensorModel(SMCModel):
     def y_discrete_bar_x_sample(self, x_discrete, x_continuous):
         return self.ping_success_samples(self.distances(self.sensor_positions(x_continuous)))
 
+    def rssi_untruncated_mean(self, distance):
+        return self.rssi_untruncated_mean_intercept + self.rssi_untruncated_mean_slope*np.log10(distance)
+
+    def rssi_truncated_mean(self, distance):
+        return stats.truncnorm.stats(
+            a = (self.lower_rssi_cutoff - self.rssi_untruncated_mean(distance))/self.rssi_untruncated_std_dev,
+            b = np.inf,
+            loc = self.rssi_untruncated_mean(distance),
+            scale = self.rssi_untruncated_std_dev,
+            moments = 'm')
+
+    def rssi_samples(self, distances):
+        return stats.truncnorm.rvs(
+            a = (self.lower_rssi_cutoff - self.rssi_untruncated_mean(distances))/self.rssi_untruncated_std_dev,
+            b = np.inf,
+            loc = self.rssi_untruncated_mean(distances),
+            scale = self.rssi_untruncated_std_dev)
+
+    def left_truncnorm_logpdf(self, x, untruncated_mean, untruncated_std_dev, left_cutoff):
+        logf = np.array(
+            np.subtract(stats.norm.logpdf(x, loc=untruncated_mean, scale=untruncated_std_dev),
+            np.log(1 - stats.norm.cdf(left_cutoff, loc=untruncated_mean, scale=untruncated_std_dev))))
+        logf[x < left_cutoff] = -np.inf
+        return logf
+
+    def rssi_log_pdf(self, rssi, distance):
+        return self.left_truncnorm_logpdf(
+            rssi,
+            self.rssi_untruncated_mean(distance),
+            self.rssi_untruncated_std_dev,
+            self.lower_rssi_cutoff)
+
     # Define a function which takes an X value and returns a sample of the
     # continuous Y variables
     def y_continuous_bar_x_sample(self, x_discrete, x_continuous):
-        return self.rssi_samples_function(self.distances(self.sensor_positions(x_continuous)))
+        return self.rssi_samples(self.distances(self.sensor_positions(x_continuous)))
 
     # Define a function which combines the above to take an X value and return a
     # Y sample
@@ -369,7 +417,7 @@ class SensorModel(SMCModel):
                 )
             )
         )
-        continuous_log_probability_densities = self.rssi_log_pdf_function(
+        continuous_log_probability_densities = self.rssi_log_pdf(
             y_continuous,
             distances_x
         )
