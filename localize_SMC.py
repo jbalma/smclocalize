@@ -157,16 +157,14 @@ class SMCModel(object):
         y_discrete_initial,
         y_continuous_initial,
         num_particles = 1000,
-        t = np.nan
     ):
-        x_discrete_particles_initial, x_continuous_particles_initial = self.x_initial_sample(num_particles, t)
+        x_discrete_particles_initial, x_continuous_particles_initial = self.x_initial_sample(num_particles)
         # Assign weights to the new particles using the observation function
         log_weights_initial = self.y_bar_x_log_pdf(
             x_discrete_particles_initial,
             x_continuous_particles_initial,
             np.tile(y_discrete_initial, (num_particles, 1)),
-            np.tile(y_continuous_initial, (num_particles, 1)),
-            t
+            np.tile(y_continuous_initial, (num_particles, 1))
         )
         # Normalize the weights
         log_weights_initial = log_weights_initial - special.logsumexp(log_weights_initial)
@@ -181,8 +179,7 @@ class SMCModel(object):
         x_discrete_particles_previous, x_continuous_particles_previous,
         log_weights_previous,
         y_discrete, y_continuous,
-        t_previous = np.nan,
-        t = np.nan
+        t_delta
     ):
         # Need to check dimensions and types of all arguments
 
@@ -198,16 +195,14 @@ class SMCModel(object):
         x_discrete_particles, x_continuous_particles = self.x_bar_x_prev_sample(
             x_discrete_particles_previous[ancestors],
             x_continuous_particles_previous[ancestors],
-            t_previous,
-            t
+            t_delta
         )
         # Assign weights to the new particles using the observation function
         log_weights = self.y_bar_x_log_pdf(
             x_discrete_particles,
             x_continuous_particles,
             np.tile(y_discrete, (num_particles, 1)),
-            np.tile(y_continuous, (num_particles, 1)),
-            t
+            np.tile(y_continuous, (num_particles, 1))
         )
         # Normalize the weights
         log_weights = log_weights - special.logsumexp(log_weights)
@@ -246,8 +241,7 @@ class SMCModel(object):
         x_discrete_particles_trajectory[0], x_continuous_particles_trajectory[0], log_weights_trajectory[0] = self.generate_initial_particles(
             y_discrete_trajectory[0],
             y_continuous_trajectory[0],
-            num_particles,
-            t_trajectory[0]
+            num_particles
         )
         # We should probably populate ancestors_trajectory[0] with NA's
         # Generate the rest of the X particle trajectory by stepping through the
@@ -259,28 +253,25 @@ class SMCModel(object):
                 log_weights_trajectory[i - 1],
                 y_discrete_trajectory[i],
                 y_continuous_trajectory[i],
-                t_trajectory[i - 1],
-                t_trajectory[i]
+                t_trajectory[i] - t_trajectory[i - 1]
             )
         return x_discrete_particles_trajectory, x_continuous_particles_trajectory, log_weights_trajectory, ancestors_trajectory
 
     def generate_initial_simulation_timestep(
-        self,
-        t_initial
+        self
     ):
-        x_discrete_initial, x_continuous_initial = self.x_initial_sample(1, t_initial)
-        y_discrete_initial, y_continuous_initial = self.y_bar_x_sample(x_discrete_initial, x_continuous_initial, t_initial)
+        x_discrete_initial, x_continuous_initial = self.x_initial_sample()
+        y_discrete_initial, y_continuous_initial = self.y_bar_x_sample(x_discrete_initial, x_continuous_initial)
         return x_discrete_initial, x_continuous_initial, y_discrete_initial, y_continuous_initial
 
     def generate_next_simulation_timestep(
         self,
         x_discrete_previous,
         x_continuous_previous,
-        t_previous,
-        t
+        t_delta
     ):
-        x_discrete, x_continuous = self.x_bar_x_prev_sample(x_discrete_previous, x_continuous_previous, t_previous, t)
-        y_discrete, y_continuous = self.y_bar_x_sample(x_discrete_previous, x_continuous_previous, t)
+        x_discrete, x_continuous = self.x_bar_x_prev_sample(x_discrete_previous, x_continuous_previous, t_delta)
+        y_discrete, y_continuous = self.y_bar_x_sample(x_discrete_previous, x_continuous_previous)
         return x_discrete, x_continuous, y_discrete, y_continuous
 
     def generate_simulation_trajectory(
@@ -292,13 +283,12 @@ class SMCModel(object):
         x_continuous_trajectory = np.zeros((num_timesteps_trajectory, self.num_x_continuous_vars), dtype='float')
         y_discrete_trajectory = np.zeros((num_timesteps_trajectory, self.num_y_discrete_vars), dtype='int')
         y_continuous_trajectory = np.zeros((num_timesteps_trajectory, self.num_y_continuous_vars), dtype='float')
-        x_discrete_trajectory[0], x_continuous_trajectory[0], y_discrete_trajectory[0], y_continuous_trajectory[0] = self.generate_initial_simulation_timestep(t_trajectory[0])
+        x_discrete_trajectory[0], x_continuous_trajectory[0], y_discrete_trajectory[0], y_continuous_trajectory[0] = self.generate_initial_simulation_timestep()
         for t_index in range(1, num_timesteps_trajectory):
             x_discrete_trajectory[t_index], x_continuous_trajectory[t_index], y_discrete_trajectory[t_index], y_continuous_trajectory[t_index] = self.generate_next_simulation_timestep(
                 x_discrete_trajectory[t_index - 1],
                 x_continuous_trajectory[t_index - 1],
-                t_trajectory[t_index - 1],
-                t_trajectory[t_index])
+                t_trajectory[t_index] - t_trajectory[t_index - 1])
         return x_discrete_trajectory, x_continuous_trajectory, y_discrete_trajectory, y_continuous_trajectory
 
 
@@ -350,7 +340,7 @@ class SensorModel(SMCModel):
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
 
     # Define a function which generates samples of the initial X state
-    def x_initial_sample(self, num_samples = 1, t = np.nan):
+    def x_initial_sample(self, num_samples = 1):
         x_discrete_initial_sample = np.tile(np.array([]), (num_samples, 1))
         x_continuous_initial_sample = np.squeeze(
             self.sensor_variable_structure.extract_x_variables(
@@ -365,8 +355,8 @@ class SensorModel(SMCModel):
 
     # Define a function which generates a sample of the current X state given the
     # previous X state
-    def x_bar_x_prev_sample(self, x_discrete_prev, x_continuous_prev, t_prev = np.nan, t = np.nan):
-        moving_sensor_drift = self.moving_sensor_drift_reference*np.sqrt((t - t_prev)/self.reference_time_delta)
+    def x_bar_x_prev_sample(self, x_discrete_prev, x_continuous_prev, t_delta):
+        moving_sensor_drift = self.moving_sensor_drift_reference*np.sqrt(t_delta/self.reference_time_delta)
         x_discrete_bar_x_prev_sample = np.array([])
         x_continuous_bar_x_prev_sample = stats.truncnorm.rvs(
             a = (np.tile(self.room_corners[0], self.sensor_variable_structure.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
@@ -463,12 +453,12 @@ class SensorModel(SMCModel):
 
     # Define a function which combines the above to take an X value and return a
     # Y sample
-    def y_bar_x_sample(self, x_discrete, x_continuous, t = np.nan):
+    def y_bar_x_sample(self, x_discrete, x_continuous):
         return self.y_discrete_bar_x_sample(x_discrete, x_continuous), self.y_continuous_bar_x_sample(x_discrete, x_continuous)
 
     # Define a function which takes an X value and a Y value and returns the
     # probability density of that Y value given that X value
-    def y_bar_x_log_pdf(self, x_discrete, x_continuous, y_discrete, y_continuous, t = np.nan):
+    def y_bar_x_log_pdf(self, x_discrete, x_continuous, y_discrete, y_continuous):
         distances_x = self.distances(self.sensor_positions(x_continuous))
         ping_success_probabilities_array_x = self.ping_success_probabilities_array(distances_x)
         discrete_log_probabilities = np.log(
