@@ -271,30 +271,17 @@ class SensorModel(SMCModel):
         self.rssi_untruncated_std_dev = rssi_untruncated_std_dev
         self.lower_rssi_cutoff = lower_rssi_cutoff
 
-        self.num_child_sensors = self.sensor_variable_structure.num_child_sensors
-        self.num_material_sensors = self.sensor_variable_structure.num_material_sensors
-        self.num_teacher_sensors = self.sensor_variable_structure.num_teacher_sensors
-        self.num_area_sensors = self.sensor_variable_structure.num_area_sensors
-        self.num_dimensions = self.sensor_variable_structure.num_dimensions
-        self.num_x_discrete_vars = self.sensor_variable_structure.num_x_discrete_vars
-        self.num_x_continuous_vars = self.sensor_variable_structure.num_x_continuous_vars
-        self.num_y_discrete_vars = self.sensor_variable_structure.num_y_discrete_vars
-        self.num_y_continuous_vars = self.sensor_variable_structure.num_y_continuous_vars
-        self.num_moving_sensors = self.sensor_variable_structure.num_moving_sensors
-        self.num_fixed_sensors = self.sensor_variable_structure.num_fixed_sensors
-        self.num_sensors = self.sensor_variable_structure.num_sensors
-
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
 
     # Define a function which generates samples of the initial X state
-    def x_initial_sample(self, num_samples=1, t = np.nan):
+    def x_initial_sample(self, num_samples = 1, t = np.nan):
         x_discrete_initial_sample = np.tile(np.array([]), (num_samples, 1))
         x_continuous_initial_sample = np.squeeze(
             self.sensor_variable_structure.extract_x_variables(
                 np.random.uniform(
-                    low = np.tile(self.room_corners[0], (self.num_sensors, 1)),
-                    high = np.tile(self.room_corners[1], (self.num_sensors, 1)),
-                    size = (num_samples, self.num_sensors, self.num_dimensions)
+                    low = np.tile(self.room_corners[0], (self.sensor_variable_structure.num_sensors, 1)),
+                    high = np.tile(self.room_corners[1], (self.sensor_variable_structure.num_sensors, 1)),
+                    size = (num_samples, self.sensor_variable_structure.num_sensors, self.sensor_variable_structure.num_dimensions)
                 )
             )
         )
@@ -306,8 +293,8 @@ class SensorModel(SMCModel):
         moving_sensor_drift = self.moving_sensor_drift_reference*np.sqrt((t - t_prev)/self.reference_time_delta)
         x_discrete_bar_x_prev_sample = np.array([])
         x_continuous_bar_x_prev_sample = stats.truncnorm.rvs(
-            a = (np.tile(self.room_corners[0], self.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
-            b = (np.tile(self.room_corners[1], self.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
+            a = (np.tile(self.room_corners[0], self.sensor_variable_structure.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
+            b = (np.tile(self.room_corners[1], self.sensor_variable_structure.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
             loc = x_continuous_prev,
             scale = moving_sensor_drift
         )
@@ -317,7 +304,7 @@ class SensorModel(SMCModel):
     # the positions of all sensors (including the fixed sensors)
     def sensor_positions(self, x_continuous):
         return np.concatenate(
-            (x_continuous.reshape(x_continuous.shape[:-1] + (self.num_moving_sensors, self.num_dimensions)),
+            (x_continuous.reshape(x_continuous.shape[:-1] + (self.sensor_variable_structure.num_moving_sensors, self.sensor_variable_structure.num_dimensions)),
             np.broadcast_to(self.fixed_sensor_positions, x_continuous.shape[:-1] + self.fixed_sensor_positions.shape)),
             axis=-2
         )
