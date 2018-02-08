@@ -82,6 +82,39 @@ class SensorVariableStructure(object):
         self.num_y_discrete_vars = np.sum(self.extract_y_variables_mask)
         self.num_y_continuous_vars = np.sum(self.extract_y_variables_mask)
 
+        self.child_sensor_names = ['Child sensor {}'.format(id) for id in child_entity_ids]
+        self.material_sensor_names = ['Material sensor {}'.format(id) for id in material_entity_ids]
+        self.teacher_sensor_names = ['Teacher sensor {}'.format(id) for id in teacher_entity_ids]
+        self.area_sensor_names = ['Area sensor {}'.format(id) for id in area_entity_ids]
+
+        self.moving_sensor_names = self.child_sensor_names + self.material_sensor_names + self.teacher_sensor_names
+        self.fixed_sensor_names = self.area_sensor_names
+        self.sensor_names = self.moving_sensor_names + self.fixed_sensor_names
+
+        self.dimension_names_all = ['$l$', '$w$', '$h']
+        self.dimension_names = self.dimension_names_all[:self.num_dimensions]
+
+        self.x_discrete_names = []
+        self.sensor_position_name_matrix = [[
+            '{} {} position'.format(sensor_name, dimension_name)
+            for dimension_name in self.dimension_names]
+            for sensor_name in self.sensor_names]
+        self.x_continuous_names = self.extract_x_variables(np.array(self.sensor_position_name_matrix)).tolist()
+
+        self.y_discrete_name_matrix = [[
+            'Status of ping from {} to {}'.format(sending_sensor_name, receiving_sensor_name)
+            for receiving_sensor_name in self.sensor_names]
+            for sending_sensor_name in self.sensor_names]
+        self.y_continuous_name_matrix = [[
+            'RSSI of ping from {} to {}'.format(sending_sensor_name, receiving_sensor_name)
+            for receiving_sensor_name in self.sensor_names]
+            for sending_sensor_name in self.sensor_names]
+        self.y_discrete_names = self.extract_y_variables(np.array(self.y_discrete_name_matrix)).tolist()
+        self.y_continuous_names = self.extract_y_variables(np.array(self.y_continuous_name_matrix)).tolist()
+
+        self.ping_status_names = ['Received', 'Not received']
+        self.num_ping_statuses = len(self.ping_status_names)
+
     # Define a function which uses the Boolean mask defined above to extract and
     # flatten X values from a larger data structure
     def extract_x_variables(self, a):
