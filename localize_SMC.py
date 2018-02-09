@@ -125,6 +125,39 @@ class SensorVariableStructure(object):
     def extract_y_variables(self, a):
         return a[..., self.extract_y_variables_mask]
 
+    def sensor_data_parse_one_timestep(self, dataframe):
+        y_discrete_all_sensors = np.ones(
+            (self.num_sensors, self.num_sensors),
+            dtype='int'
+        )
+        y_continuous_all_sensors = np.zeros(
+            (self.num_sensors, self.num_sensors),
+            dtype='float'
+        )
+        for row in range(len(dataframe)):
+            y_discrete_all_sensors[
+                self.entity_ids.index(dataframe.iloc[row]['remote_id']),
+                self.entity_ids.index(dataframe.iloc[row]['local_id'])
+            ] = 0
+            y_continuous_all_sensors[
+                self.entity_ids.index(dataframe.iloc[row]['remote_id']),
+                self.entity_ids.index(dataframe.iloc[row]['local_id'])
+            ] = dataframe.iloc[row]['rssi']
+        return self.extract_y_variables(y_discrete_all_sensors), self.extract_y_variables(y_continuous_all_sensors)
+
+    def sensor_data_parse_multiple_timesteps(self, dataframe):
+        timestamps = np.sort(dataframe['observed_at'].unique())
+        num_timesteps = len(timestamps)
+        y_discrete_t = np.ones(
+            (num_timesteps, self.num_y_discrete_vars),
+            dtype='int')
+        y_continuous_t = np.zeros(
+            (num_timesteps, self.num_y_continuous_vars),
+            dtype='float')
+        for t_index in range(num_timesteps):
+            (y_discrete_t[t_index], y_continuous_t[t_index]) = self.sensor_data_parse_one_timestep(
+                    dataframe[dataframe['observed_at'] == timestamps[t_index]])
+        return y_discrete_t, y_continuous_t, timestamps
 
 # Define a class for a generic sequential Monte Carlo (AKA state space) model
 class SMCModel(object):
