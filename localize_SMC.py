@@ -2,10 +2,9 @@ import numpy as np
 from scipy import special
 from scipy import stats
 
-# Define a class which defines an X and Y variable structure based on the number
-# of each type of sensor
+# Define a class which provides a bunch of tools for working with sensor data,
+# based on lists of entity IDs
 class SensorVariableStructure(object):
-    # We only need to provide this object with the number of each type of sensor
     def __init__(
         self,
         child_entity_ids,
@@ -13,7 +12,6 @@ class SensorVariableStructure(object):
         teacher_entity_ids,
         area_entity_ids,
         num_dimensions = 2):
-        # Need to check dimensions and types of all arguments
         self.child_entity_ids = child_entity_ids
         self.material_entity_ids = material_entity_ids
         self.teacher_entity_ids = teacher_entity_ids
@@ -34,20 +32,21 @@ class SensorVariableStructure(object):
         self.num_sensors = self.num_moving_sensors + self.num_fixed_sensors
 
         # Define a Boolean mask which helps us extract and flatten X values from
-        # an array representing the positions of all sensors. Start with an
+        # an array representing sensor positions. Start with an
         # array that has a row for every sensor and a column for every spatial
-        # dimension
+        # dimension.
         self.extract_x_variables_mask = np.full((self.num_sensors, self.num_dimensions), True)
-        # We don't track the positions of fixed sensors
+        # We don't track the positions of fixed sensors.
         self.extract_x_variables_mask[self.num_moving_sensors:,:] = False
 
-        # Define the number of discrete and continuous x variables using this mask
+        # Define the number of discrete and continuous x variables using this
+        # mask. This is the key information needed by the SMC model functions.
         self.num_x_discrete_vars = 0
         self.num_x_continuous_vars = np.sum(self.extract_x_variables_mask)
 
         # Define a Boolean mask which help us extract and flatten Y values from
         # an array representing every pairwise combination of sensors. Start
-        # with an array that has every pairwise combination of sensors
+        # with an array that has every pairwise combination of sensors.
         self.extract_y_variables_mask = np.full((self.num_sensors, self.num_sensors), True)
         # Sensors don't send pings to themselves
         np.fill_diagonal(self.extract_y_variables_mask, False)
@@ -69,13 +68,14 @@ class SensorVariableStructure(object):
             self.num_moving_sensors:] = False
         self.extract_y_variables_mask[
             self.num_moving_sensors:,
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)
-        ] = False
+            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)] = False
 
-        # Define the number of discrete and continuous Y variables using this mask
+        # Define the number of discrete and continuous Y variables using this
+        # mask.
         self.num_y_discrete_vars = np.sum(self.extract_y_variables_mask)
         self.num_y_continuous_vars = np.sum(self.extract_y_variables_mask)
 
+        # Define names for the sensor variables and their values.
         self.child_sensor_names = ['Child sensor {}'.format(id) for id in child_entity_ids]
         self.material_sensor_names = ['Material sensor {}'.format(id) for id in material_entity_ids]
         self.teacher_sensor_names = ['Teacher sensor {}'.format(id) for id in teacher_entity_ids]
@@ -109,16 +109,14 @@ class SensorVariableStructure(object):
         self.ping_status_names = ['Received', 'Not received']
         self.num_ping_statuses = len(self.ping_status_names)
 
-    # Define a function which uses the Boolean mask defined above to extract and
-    # flatten X values from a larger data structure
+    # Define functions which use the Boolean masks above to extract and
+    # flatten X and Y values from larger data arrays.
     def extract_x_variables(self, a):
         return a[..., self.extract_x_variables_mask]
-
-    # Define a function which uses the Boolean mask defined above to extract and
-    # flatten Y values from a larger data structure
     def extract_y_variables(self, a):
         return a[..., self.extract_y_variables_mask]
 
+    # Parse a dataframe containing a single time step of ping data
     def sensor_data_parse_one_timestep(self, dataframe):
         y_discrete_all_sensors = np.ones(
             (self.num_sensors, self.num_sensors),
@@ -135,6 +133,7 @@ class SensorVariableStructure(object):
                 self.entity_ids.index(dataframe.iloc[row]['local_id'])] = dataframe.iloc[row]['rssi']
         return self.extract_y_variables(y_discrete_all_sensors), self.extract_y_variables(y_continuous_all_sensors)
 
+    # Parse a dataframe containing multiple time steps of ping data
     def sensor_data_parse_multiple_timesteps(self, dataframe):
         timestamps = np.sort(dataframe['observed_at'].unique())
         num_timesteps = len(timestamps)
@@ -151,16 +150,19 @@ class SensorVariableStructure(object):
 
 # Define a class for a generic sequential Monte Carlo (AKA state space) model
 class SMCModel(object):
-
     # We need to supply this object with functions representing the various
     # conditional probability distributions which comprise the model as well as
-    # the structure of the X and Y variables
+    # the number of discrete and continuous X and Y variables.
     def __init__(
         self,
-        x_initial_sample, x_bar_x_previous_sample, y_bar_x_sample, y_bar_x_log_pdf,
-        num_x_discrete_vars, num_x_continuous_vars,
-        num_y_discrete_vars, num_y_continuous_vars):
-        # Need to check dimensions and types of all arguments
+        x_initial_sample,
+        x_bar_x_previous_sample,
+        y_bar_x_sample,
+        y_bar_x_log_pdf,
+        num_x_discrete_vars,
+        num_x_continuous_vars,
+        num_y_discrete_vars,
+        num_y_continuous_vars):
         self.x_initial_sample = x_initial_sample
         self.x_bar_x_previous_sample = x_bar_x_previous_sample
         self.y_bar_x_sample = y_bar_x_sample
@@ -169,63 +171,52 @@ class SMCModel(object):
         self.num_x_continuous_vars = num_x_continuous_vars
         self.num_y_discrete_vars = num_y_discrete_vars
         self.num_y_continuous_vars = num_y_continuous_vars
-        # Would it make sense to define X and Y objects which combine the
-        # discrete and continuous portions of each type of variable?
 
-    # Define a function which generates an initial set of X particles along with
-    # their weights
+    # Generates an initial set of X particles (samples) along with
+    # their weights.
     def generate_initial_particles(
         self,
         y_discrete_initial,
         y_continuous_initial,
         num_particles = 1000):
         x_discrete_particles_initial, x_continuous_particles_initial = self.x_initial_sample(num_particles)
-        # Assign weights to the new particles using the observation function
         log_weights_initial = self.y_bar_x_log_pdf(
             x_discrete_particles_initial,
             x_continuous_particles_initial,
             np.tile(y_discrete_initial, (num_particles, 1)),
             np.tile(y_continuous_initial, (num_particles, 1)))
-        # Normalize the weights
         log_weights_initial = log_weights_initial - special.logsumexp(log_weights_initial)
         return x_discrete_particles_initial, x_continuous_particles_initial, log_weights_initial
 
-    # Define a function which takes a set of particles and weights from the
-    # previous time step and a Y value from the current time step and returns a set
-    # of particles and weights for the current timestep along with a list of
-    # their ancestor particles
+    # Generate a set of X particles and weights (along with pointers to the
+    # particles' ancestors) for the current time step based on the set of
+    # particles and weights from the previous time step and a Y value from the
+    # current time step.
     def generate_next_particles(
         self,
         x_discrete_particles_previous, x_continuous_particles_previous,
         log_weights_previous,
         y_discrete, y_continuous,
         t_delta):
-        # Need to check dimensions and types of all arguments
-
-        # Infer the number of particles from the dimensions of X_previous
         num_particles = x_discrete_particles_previous.shape[0]
-        # Choose an ancestor for each new particle based on the previous weights
         ancestors = np.random.choice(
             num_particles,
             size = num_particles,
             p = np.exp(log_weights_previous))
-        # Generate the new particles using the state transition function
         x_discrete_particles, x_continuous_particles = self.x_bar_x_previous_sample(
             x_discrete_particles_previous[ancestors],
             x_continuous_particles_previous[ancestors],
             t_delta)
-        # Assign weights to the new particles using the observation function
         log_weights = self.y_bar_x_log_pdf(
             x_discrete_particles,
             x_continuous_particles,
             np.tile(y_discrete, (num_particles, 1)),
             np.tile(y_continuous, (num_particles, 1)))
-        # Normalize the weights
         log_weights = log_weights - special.logsumexp(log_weights)
         return x_discrete_particles, x_continuous_particles, log_weights, ancestors
 
-    # Define a function with takes an entire trajectory of Y values and returns
-    # an entire trajectory of X particles along with their weights and ancestors
+    # Generate an entire trajectory of X particles along with their weights and
+    # ancestors based on an entire trajectory of Y values.
     def generate_particle_trajectory(
         self,
         variable_structure,
@@ -233,11 +224,7 @@ class SMCModel(object):
         y_discrete_trajectory,
         y_continuous_trajectory,
         num_particles = 1000):
-        # Need to check dimensions and types of all arguments
-
-        # Infer the number of timesteps from the dimensions of the Y trajectory
         num_timesteps = len(t_trajectory)
-        # Initialize all of the outputs
         x_discrete_particles_trajectory = np.zeros(
             (num_timesteps, num_particles, self.num_x_discrete_vars),
             dtype='int')
@@ -250,14 +237,10 @@ class SMCModel(object):
         ancestors_trajectory = np.zeros(
             (num_timesteps, num_particles),
             dtype='int')
-        # Generate an initial set of X particles
         x_discrete_particles_trajectory[0], x_continuous_particles_trajectory[0], log_weights_trajectory[0] = self.generate_initial_particles(
             y_discrete_trajectory[0],
             y_continuous_trajectory[0],
             num_particles)
-        # We should probably populate ancestors_trajectory[0] with NA's
-        # Generate the rest of the X particle trajectory by stepping through the
-        # rest of the Y values
         for i in range(1, num_timesteps):
             x_discrete_particles_trajectory[i], x_continuous_particles_trajectory[i], log_weights_trajectory[i], ancestors_trajectory[i] = self.generate_next_particles(
                 x_discrete_particles_trajectory[i - 1],
@@ -268,6 +251,7 @@ class SMCModel(object):
                 t_trajectory[i] - t_trajectory[i - 1])
         return x_discrete_particles_trajectory, x_continuous_particles_trajectory, log_weights_trajectory, ancestors_trajectory
 
+    # Generate the initial time step of a simulated X and Y data set.
     def generate_initial_simulation_timestep(
         self):
         x_discrete_initial, x_continuous_initial = self.x_initial_sample()
@@ -276,6 +260,8 @@ class SMCModel(object):
             x_continuous_initial)
         return x_discrete_initial, x_continuous_initial, y_discrete_initial, y_continuous_initial
 
+    # Generate a single time step of simulated X and Y data based on the
+    # previous time step and a time delta.
     def generate_next_simulation_timestep(
         self,
         x_discrete_previous,
@@ -290,6 +276,7 @@ class SMCModel(object):
             x_continuous_previous)
         return x_discrete, x_continuous, y_discrete, y_continuous
 
+    # Generate an entire trajectory of simulated X and Y data.
     def generate_simulation_trajectory(
         self,
         t_trajectory):
@@ -317,13 +304,11 @@ class SMCModel(object):
 # Define a class based on the generic sequential Monte Carlo model class which
 # represents an instance of our particular sensor model
 class SensorModel(SMCModel):
-
-    # We need to supply this object with the classroom configuration (number of
-    # each kind of sensor, room dimensions, positions of area sensors), the
-    # distance that we expect sensors to move from timestep to timestep, and
-    # the probability distributions for the sensor response as functions of
-    # inter-sensor distance: a ping success probability function, a function
-    # which generates RSSI samples, and an RSSI probability density function
+    # We need to supply this object with the sensor variable structure (an
+    # instance of the SensorVariableStructure class above), the physical
+    # classroom configuration (room corners and positions of fixed sensors), and
+    # various parameters for the state transition function and sensor response
+    # functions.
     def __init__(
         self,
         sensor_variable_structure,
@@ -338,7 +323,6 @@ class SensorModel(SMCModel):
         rssi_untruncated_mean_slope = -20.0,
         rssi_untruncated_std_dev = 5.70,
         lower_rssi_cutoff = -96.0001):
-        # Need to check dimensions and types of all arguments
         self.sensor_variable_structure = sensor_variable_structure
         self.room_corners = room_corners
         self.fixed_sensor_positions = fixed_sensor_positions
@@ -359,7 +343,8 @@ class SensorModel(SMCModel):
 
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
 
-    # Define a function which generates samples of the initial X state
+    # Define the function which generate samples of the initial X state. This
+    # function is needed by the SMC model functions above.
     def x_initial_sample(self, num_samples = 1):
         x_discrete_initial_sample = np.tile(np.array([]), (num_samples, 1))
         x_continuous_initial_sample = np.squeeze(
@@ -370,8 +355,9 @@ class SensorModel(SMCModel):
                     size = (num_samples, self.sensor_variable_structure.num_sensors, self.sensor_variable_structure.num_dimensions))))
         return x_discrete_initial_sample, x_continuous_initial_sample
 
-    # Define a function which generates a sample of the current X state given the
-    # previous X state
+    # Define the function which generates a sample of the current X state given
+    # the previous X state. This function is needed by the SMC model functions
+    # above.
     def x_bar_x_previous_sample(self, x_discrete_previous, x_continuous_previous, t_delta):
         moving_sensor_drift = self.moving_sensor_drift_reference*np.sqrt(t_delta/self.reference_time_delta)
         x_discrete_bar_x_previous_sample = np.array([])
@@ -382,17 +368,16 @@ class SensorModel(SMCModel):
             scale = moving_sensor_drift)
         return x_discrete_bar_x_previous_sample, x_continuous_bar_x_previous_sample
 
-    # Define a function which takes an X value and returns an array representing
-    # the positions of all sensors (including the fixed sensors)
+    # Generate an array of the positions of all sensors (including the fixed
+    # sensors) based on an X value (or an array of X values).
     def sensor_positions(self, x_continuous):
         return np.concatenate(
             (x_continuous.reshape(x_continuous.shape[:-1] + (self.sensor_variable_structure.num_moving_sensors, self.sensor_variable_structure.num_dimensions)),
             np.broadcast_to(self.fixed_sensor_positions, x_continuous.shape[:-1] + self.fixed_sensor_positions.shape)),
             axis=-2)
 
-    # Define a function which takes a array representing the positions of all
-    # sensors and returns a vector of inter-sensor distances corresponding to
-    # the Y variables
+    # Generate an array of of inter-sensor distances (with the same structure as
+    # Y values) based on an array of sensor positions.
     def distances(self, sensor_positions):
         return self.sensor_variable_structure.extract_y_variables(
             np.linalg.norm(
@@ -401,33 +386,40 @@ class SensorModel(SMCModel):
                     sensor_positions[...,:,np.newaxis,:]),
                 axis = -1))
 
+    # Generate the probability of a ping being received (or an array of such
+    # probabilities) given the distance between the sending and receiving
+    # sensors (or an array of such distances).
     def ping_success_probability(self, distances):
         return self.ping_success_probability_zero_distance*np.exp(distances/self.scale_factor)
 
-    # Define a function which takes a vector of inter-sensor distances
-    # corresponding to the Y variables and returns a corresponding array of
-    # ping success probabilities
+    # Generate an array which combines the probabilities calculated above along
+    # with their complements (i.e., the probabilities of the pings *not* being
+    # received). This structure is needed for several functions below.
     def ping_success_probabilities_array(self, distances):
         probabilities = self.ping_success_probability(distances)
         return np.stack((probabilities, 1 - probabilities), axis=-1)
 
-    # Define a function which takes a vector of inter-sensor distances
-    # corresponding to the Y variables and returns a vector of ping success
-    # samples
+    # Generate an array of ping success samples given an array of inter-sensor
+    # distances.
     def ping_success_samples(self, distances):
         return np.apply_along_axis(
             lambda p_array: np.random.choice(len(p_array), p=p_array),
             axis=-1,
             arr=self.ping_success_probabilities_array(distances))
 
-    # Define a function which takes an X value and returns a sample of the
-    # discrete Y variables
+    # Generate a sample discrete Y value (or an array of such samples) based on
+    # a value of X (or an array of X values).
     def y_discrete_bar_x_sample(self, x_discrete, x_continuous):
         return self.ping_success_samples(self.distances(self.sensor_positions(x_continuous)))
 
+    # Generate the mean of the underlying distribution of measured RSSI values
+    # (or an array of such means) given the distance between two senors (or an
+    # array of such distances).
     def rssi_untruncated_mean(self, distance):
         return self.rssi_untruncated_mean_intercept + self.rssi_untruncated_mean_slope*np.log10(distance)
 
+    # Generate the mean of the distribution which results when we truncate the
+    # distribution above.
     def rssi_truncated_mean(self, distance):
         return stats.truncnorm.stats(
             a = (self.lower_rssi_cutoff - self.rssi_untruncated_mean(distance))/self.rssi_untruncated_std_dev,
@@ -436,6 +428,8 @@ class SensorModel(SMCModel):
             scale = self.rssi_untruncated_std_dev,
             moments = 'm')
 
+    # Generate a sample RSSI value (or an array of such samples) given the
+    # distance between two sensors (or an array of such distances).
     def rssi_samples(self, distances):
         return stats.truncnorm.rvs(
             a = (self.lower_rssi_cutoff - self.rssi_untruncated_mean(distances))/self.rssi_untruncated_std_dev,
@@ -443,6 +437,9 @@ class SensorModel(SMCModel):
             loc = self.rssi_untruncated_mean(distances),
             scale = self.rssi_untruncated_std_dev)
 
+    # Generate the (log of the) probability density for a left-truncated normal
+    # distribution (we define our own function here rather than use the
+    # corresponding SciPy function because the latter is slow).
     def left_truncnorm_logpdf(self, x, untruncated_mean, untruncated_std_dev, left_cutoff):
         logf = np.array(
             np.subtract(
@@ -457,6 +454,9 @@ class SensorModel(SMCModel):
         logf[x < left_cutoff] = -np.inf
         return logf
 
+    # Generate the (log of the) probability density for a given RSSI value (or
+    # an array of such probability densities) given the distance between two
+    # sensors (or an array of such distances).
     def rssi_log_pdf(self, rssi, distance):
         return self.left_truncnorm_logpdf(
             rssi,
@@ -464,18 +464,21 @@ class SensorModel(SMCModel):
             self.rssi_untruncated_std_dev,
             self.lower_rssi_cutoff)
 
-    # Define a function which takes an X value and returns a sample of the
-    # continuous Y variables
+    # Using the various helper functions above, generate a sample continuous Y
+    # value (or an array of such samples) given an X value (or an array of such
+    # values)
     def y_continuous_bar_x_sample(self, x_discrete, x_continuous):
         return self.rssi_samples(self.distances(self.sensor_positions(x_continuous)))
 
-    # Define a function which combines the above to take an X value and return a
-    # Y sample
+    # Define a function which combines the above to produce a sample Y value (or
+    # an array of such samples) given an X value (or an array of such values).
+    # This function is needed by the SMC model functions above.
     def y_bar_x_sample(self, x_discrete, x_continuous):
         return self.y_discrete_bar_x_sample(x_discrete, x_continuous), self.y_continuous_bar_x_sample(x_discrete, x_continuous)
 
     # Define a function which takes an X value and a Y value and returns the
-    # probability density of that Y value given that X value
+    # probability density of that Y value given that X value. This function is
+    # needed by the SMC model functions above.
     def y_bar_x_log_pdf(
         self,
         x_discrete,
