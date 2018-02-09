@@ -245,9 +245,11 @@ class SMCModel(object):
     # an entire trajectory of X particles along with their weights and ancestors
     def generate_particle_trajectory(
         self,
-        y_discrete_trajectory, y_continuous_trajectory,
+        variable_structure,
+        t_trajectory,
+        y_discrete_trajectory,
+        y_continuous_trajectory,
         num_particles = 1000,
-        t_trajectory = np.nan,
     ):
         # Need to check dimensions and types of all arguments
 
@@ -255,11 +257,11 @@ class SMCModel(object):
         num_timesteps = len(t_trajectory)
         # Initialize all of the outputs
         x_discrete_particles_trajectory = np.zeros(
-            (num_timesteps, num_particles, num_x_discrete_vars),
+            (num_timesteps, num_particles, self.num_x_discrete_vars),
             dtype='int'
         )
         x_continuous_particles_trajectory = np.zeros(
-            (num_timesteps, num_particles, num_x_continous_vars),
+            (num_timesteps, num_particles, self.num_x_continuous_vars),
             dtype='float'
         )
         log_weights_trajectory = np.zeros(
