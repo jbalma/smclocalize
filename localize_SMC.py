@@ -167,13 +167,13 @@ class SMCModel(object):
     # the structure of the X and Y variables
     def __init__(
         self,
-        x_initial_sample, x_bar_x_prev_sample, y_bar_x_sample, y_bar_x_log_pdf,
+        x_initial_sample, x_bar_x_previous_sample, y_bar_x_sample, y_bar_x_log_pdf,
         num_x_discrete_vars, num_x_continuous_vars,
         num_y_discrete_vars, num_y_continuous_vars
     ):
         # Need to check dimensions and types of all arguments
         self.x_initial_sample = x_initial_sample
-        self.x_bar_x_prev_sample = x_bar_x_prev_sample
+        self.x_bar_x_previous_sample = x_bar_x_previous_sample
         self.y_bar_x_sample = y_bar_x_sample
         self.y_bar_x_log_pdf = y_bar_x_log_pdf
         self.num_x_discrete_vars = num_x_discrete_vars
@@ -225,7 +225,7 @@ class SMCModel(object):
             p = np.exp(log_weights_previous)
         )
         # Generate the new particles using the state transition function
-        x_discrete_particles, x_continuous_particles = self.x_bar_x_prev_sample(
+        x_discrete_particles, x_continuous_particles = self.x_bar_x_previous_sample(
             x_discrete_particles_previous[ancestors],
             x_continuous_particles_previous[ancestors],
             t_delta
@@ -305,7 +305,7 @@ class SMCModel(object):
         x_continuous_previous,
         t_delta
     ):
-        x_discrete, x_continuous = self.x_bar_x_prev_sample(x_discrete_previous, x_continuous_previous, t_delta)
+        x_discrete, x_continuous = self.x_bar_x_previous_sample(x_discrete_previous, x_continuous_previous, t_delta)
         y_discrete, y_continuous = self.y_bar_x_sample(x_discrete_previous, x_continuous_previous)
         return x_discrete, x_continuous, y_discrete, y_continuous
 
@@ -390,16 +390,16 @@ class SensorModel(SMCModel):
 
     # Define a function which generates a sample of the current X state given the
     # previous X state
-    def x_bar_x_prev_sample(self, x_discrete_prev, x_continuous_prev, t_delta):
+    def x_bar_x_previous_sample(self, x_discrete_previous, x_continuous_previous, t_delta):
         moving_sensor_drift = self.moving_sensor_drift_reference*np.sqrt(t_delta/self.reference_time_delta)
-        x_discrete_bar_x_prev_sample = np.array([])
-        x_continuous_bar_x_prev_sample = stats.truncnorm.rvs(
-            a = (np.tile(self.room_corners[0], self.sensor_variable_structure.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
-            b = (np.tile(self.room_corners[1], self.sensor_variable_structure.num_moving_sensors) - x_continuous_prev)/moving_sensor_drift,
-            loc = x_continuous_prev,
+        x_discrete_bar_x_previous_sample = np.array([])
+        x_continuous_bar_x_previous_sample = stats.truncnorm.rvs(
+            a = (np.tile(self.room_corners[0], self.sensor_variable_structure.num_moving_sensors) - x_continuous_previous)/moving_sensor_drift,
+            b = (np.tile(self.room_corners[1], self.sensor_variable_structure.num_moving_sensors) - x_continuous_previous)/moving_sensor_drift,
+            loc = x_continuous_previous,
             scale = moving_sensor_drift
         )
-        return x_discrete_bar_x_prev_sample, x_continuous_bar_x_prev_sample
+        return x_discrete_bar_x_previous_sample, x_continuous_bar_x_previous_sample
 
     # Define a function which takes an X value and returns an array representing
     # the positions of all sensors (including the fixed sensors)
