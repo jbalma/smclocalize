@@ -1,6 +1,8 @@
 import numpy as np
 from scipy import special
 from scipy import stats
+import math
+import time
 
 # Define a class which provides a bunch of tools for working with sensor data,
 # based on lists of entity IDs
@@ -199,20 +201,36 @@ class SMCModel(object):
         y_discrete, y_continuous,
         t_delta):
         num_particles = x_discrete_particles_previous.shape[0]
+        if __debug__:
+            start = time.clock()
         ancestors = np.random.choice(
             num_particles,
             size = num_particles,
             p = np.exp(log_weights_previous))
+        if __debug__:
+            after_ancestors = time.clock()
         x_discrete_particles, x_continuous_particles = self.x_bar_x_previous_sample(
             x_discrete_particles_previous[ancestors],
             x_continuous_particles_previous[ancestors],
             t_delta)
+        if __debug__:
+            after_transition = time.clock()
         log_weights = self.y_bar_x_log_pdf(
             x_discrete_particles,
             x_continuous_particles,
             np.tile(y_discrete, (num_particles, 1)),
             np.tile(y_continuous, (num_particles, 1)))
+        if __debug__:
+            after_weights = time.clock()
         log_weights = log_weights - special.logsumexp(log_weights)
+        if __debug__:
+            after_renormalize = time.clock()
+        if __debug__:
+            print '[generate_next_particles] Anc: {:.1e} Trans: {:.1e} Wts: {:.1e} Renorm: {:.1e}'.format(
+                after_ancestors - start,
+                after_transition - after_ancestors,
+                after_weights - after_transition,
+                after_renormalize - after_weights)
         return x_discrete_particles, x_continuous_particles, log_weights, ancestors
 
     # Generate an entire trajectory of X particles along with their weights and
@@ -342,6 +360,7 @@ class SensorModel(SMCModel):
         self.num_y_continuous_vars = self.sensor_variable_structure.num_y_continuous_vars
 
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
+        self.norm_exponent_factor = -1/(2*self.rssi_untruncated_std_dev**2)
 
     # Define the function which generate samples of the initial X state. This
     # function is needed by the SMC model functions above.
@@ -437,32 +456,36 @@ class SensorModel(SMCModel):
             loc = self.rssi_untruncated_mean(distances),
             scale = self.rssi_untruncated_std_dev)
 
-    # Generate the (log of the) probability density for a left-truncated normal
-    # distribution (we define our own function here rather than use the
-    # corresponding SciPy function because the latter is slow).
-    def left_truncnorm_logpdf(self, x, untruncated_mean, untruncated_std_dev, left_cutoff):
-        logf = np.array(
-            np.subtract(
-                stats.norm.logpdf(
-                    x,
-                    loc=untruncated_mean,
-                    scale=untruncated_std_dev),
-                np.log(1 - stats.norm.cdf(
-                    left_cutoff,
-                    loc=untruncated_mean,
-                    scale=untruncated_std_dev))))
-        logf[x < left_cutoff] = -np.inf
+    # Generate the (log of the) probability density (or an array of such
+    # probability densities) for a given RSSI value (or an array of such values)
+    # given the distance between two sensors (or an array of such distances). We
+    # implement a truncated normal distribution by combining Numpy functions
+    # rather than by using the Scipy function because the latter appears to have
+    # a bug in its broadcasting logic.
+    def rssi_log_pdf(self, rssi, distance):
+        if __debug__:
+            start=time.clock()
+        rssi_scaled = np.subtract(rssi, self.rssi_untruncated_mean(distance))/self.rssi_untruncated_std_dev
+        if __debug__:
+            after_rssi_scale = time.clock()
+        a_scaled = np.subtract(self.lower_rssi_cutoff, self.rssi_untruncated_mean(distance))/self.rssi_untruncated_std_dev
+        if __debug__:
+            after_a_scale = time.clock()
+        log_sigma = np.log(self.rssi_untruncated_std_dev)
+        logf = stats.norm._logpdf(rssi_scaled) - log_sigma - stats.norm._logsf(a_scaled)
+        if __debug__:
+            after_dists = time.clock()
+        logf[rssi < self.lower_rssi_cutoff] = -np.inf
+        if __debug__:
+            after_truncate = time.clock()
+        if __debug__:
+            print '[rssi_log_pdf] rssi_scale: {:.1e} a_scale: {:.1e} dists: {:.1e} trunc: {:.1e}'.format(
+                after_rssi_scale - start,
+                after_a_scale - after_rssi_scale,
+                after_dists - after_a_scale,
+                after_truncate - after_dists)
         return logf
 
-    # Generate the (log of the) probability density for a given RSSI value (or
-    # an array of such probability densities) given the distance between two
-    # sensors (or an array of such distances).
-    def rssi_log_pdf(self, rssi, distance):
-        return self.left_truncnorm_logpdf(
-            rssi,
-            self.rssi_untruncated_mean(distance),
-            self.rssi_untruncated_std_dev,
-            self.lower_rssi_cutoff)
 
     # Using the various helper functions above, generate a sample continuous Y
     # value (or an array of such samples) given an X value (or an array of such
@@ -485,16 +508,32 @@ class SensorModel(SMCModel):
         x_continuous,
         y_discrete,
         y_continuous):
+        if __debug__:
+            start = time.clock()
         distances_x = self.distances(self.sensor_positions(x_continuous))
+        if __debug__:
+            after_distance = time.clock()
         ping_success_probabilities_array_x = self.ping_success_probabilities_array(distances_x)
+        if __debug__:
+            after_probarray = time.clock()
         discrete_log_probabilities = np.log(
             np.choose(
                 y_discrete,
                 np.rollaxis(
                     ping_success_probabilities_array_x,
                     axis=-1)))
+        if __debug__:
+            after_discrete = time.clock()
         continuous_log_probability_densities = self.rssi_log_pdf(
             y_continuous,
             distances_x)
+        if __debug__:
+            after_continuous = time.clock()
         continuous_log_probability_densities[y_discrete == 1] = 0.0
+        if __debug__:
+            print '[y_bar_x_log_pdf] Dist: {:.1e} ProbArray: {:.1e} Discrete: {:.1e} Cont: {:.1e}'.format(
+                after_distance - start,
+                after_probarray - after_distance,
+                after_discrete - after_probarray,
+                after_continuous - after_discrete)
         return np.sum(discrete_log_probabilities, axis=-1) + np.sum(continuous_log_probability_densities, axis=-1)
