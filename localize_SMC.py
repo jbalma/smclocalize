@@ -13,16 +13,22 @@ class SensorVariableStructure(object):
         material_entity_ids,
         teacher_entity_ids,
         area_entity_ids,
-        num_dimensions = 2):
+        num_dimensions = 2,
+        child_entity_string = 'child',
+        material_entity_string = 'material',
+        teacher_entity_string = 'teacher',
+        area_entity_string = 'area'):
         self.child_entity_ids = child_entity_ids
         self.material_entity_ids = material_entity_ids
         self.teacher_entity_ids = teacher_entity_ids
         self.area_entity_ids = area_entity_ids
         self.num_dimensions = num_dimensions
 
-        self.moving_entity_ids = child_entity_ids + material_entity_ids + teacher_entity_ids
-        self.fixed_entity_ids = area_entity_ids
-        self.entity_ids = self.moving_entity_ids + self.fixed_entity_ids
+        self.child_entity_id_index = [child_entity_string + '_' + str(child_entity_id) for child_entity_id in child_entity_ids]
+        self.material_entity_id_index = [material_entity_string + '_' + str(material_entity_id) for material_entity_id in material_entity_ids]
+        self.teacher_entity_id_index = [teacher_entity_string + '_' + str(teacher_entity_id) for teacher_entity_id in teacher_entity_ids]
+        self.area_entity_id_index = [area_entity_string + '_' + str(area_entity_id) for area_entity_id in area_entity_ids]
+        self.entity_id_index = self.child_entity_id_index + self.material_entity_id_index + self.teacher_entity_id_index + self.area_entity_id_index
 
         self.num_child_sensors = len(child_entity_ids)
         self.num_material_sensors = len(material_entity_ids)
@@ -128,11 +134,11 @@ class SensorVariableStructure(object):
             dtype='float')
         for row in range(len(dataframe)):
             y_discrete_all_sensors[
-                self.entity_ids.index(dataframe.iloc[row]['remote_id']),
-                self.entity_ids.index(dataframe.iloc[row]['local_id'])] = 0
+                self.entity_id_index.index(dataframe.iloc[row]['remote_type'] + '_' + str(dataframe.iloc[row]['remote_id'])),
+                self.entity_id_index.index(dataframe.iloc[row]['local_type'] + '_' + str(dataframe.iloc[row]['local_id']))] = 0
             y_continuous_all_sensors[
-                self.entity_ids.index(dataframe.iloc[row]['remote_id']),
-                self.entity_ids.index(dataframe.iloc[row]['local_id'])] = dataframe.iloc[row]['rssi']
+                self.entity_id_index.index(dataframe.iloc[row]['remote_type'] + '_' + str(dataframe.iloc[row]['remote_id'])),
+                self.entity_id_index.index(dataframe.iloc[row]['local_type'] + '_' + str(dataframe.iloc[row]['local_id']))] = dataframe.iloc[row]['rssi']
         return self.extract_y_variables(y_discrete_all_sensors), self.extract_y_variables(y_continuous_all_sensors)
 
     # Parse a dataframe containing multiple time steps of ping data
