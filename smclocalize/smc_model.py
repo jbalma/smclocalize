@@ -78,11 +78,11 @@ class SMCModel(object):
         if __debug__:
             after_renormalize = time.clock()
         if __debug__:
-            print '[generate_next_particles] Anc: {:.1e} Trans: {:.1e} Wts: {:.1e} Renorm: {:.1e}'.format(
+            print ('[generate_next_particles] Anc: {:.1e} Trans: {:.1e} Wts: {:.1e} Renorm: {:.1e}'.format(
                 after_ancestors - start,
                 after_transition - after_ancestors,
                 after_weights - after_transition,
-                after_renormalize - after_weights)
+                after_renormalize - after_weights))
         return x_discrete_particles, x_continuous_particles, log_weights, ancestors
 
     # Generate an entire trajectory of X particles along with their weights and

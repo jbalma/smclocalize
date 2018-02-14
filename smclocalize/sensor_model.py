@@ -2,7 +2,7 @@ import numpy as np
 from scipy import stats
 import time
 
-from smc_model import *
+from .smc_model import *
 
 # Define a class based on the generic sequential Monte Carlo model class which
 # represents an instance of our particular sensor model
@@ -164,11 +164,11 @@ class SensorModel(SMCModel):
         if __debug__:
             after_truncate = time.clock()
         if __debug__:
-            print '[rssi_log_pdf] rssi_scale: {:.1e} a_scale: {:.1e} dists: {:.1e} trunc: {:.1e}'.format(
+            print ('[rssi_log_pdf] rssi_scale: {:.1e} a_scale: {:.1e} dists: {:.1e} trunc: {:.1e}'.format(
                 after_rssi_scale - start,
                 after_a_scale - after_rssi_scale,
                 after_dists - after_a_scale,
-                after_truncate - after_dists)
+                after_truncate - after_dists))
         return logf
 
 
@@ -216,9 +216,9 @@ class SensorModel(SMCModel):
             after_continuous = time.clock()
         continuous_log_probability_densities[y_discrete == 1] = 0.0
         if __debug__:
-            print '[y_bar_x_log_pdf] Dist: {:.1e} ProbArray: {:.1e} Discrete: {:.1e} Cont: {:.1e}'.format(
+            print ('[y_bar_x_log_pdf] Dist: {:.1e} ProbArray: {:.1e} Discrete: {:.1e} Cont: {:.1e}'.format(
                 after_distance - start,
                 after_probarray - after_distance,
                 after_discrete - after_probarray,
-                after_continuous - after_discrete)
+                after_continuous - after_discrete))
         return np.sum(discrete_log_probabilities, axis=-1) + np.sum(continuous_log_probability_densities, axis=-1)
