@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+
+from distutils.core import setup
+
 setup(name='smclocalize',
       version='0.1',
       description='Sequential Monte Carlo model for sensor localization',
