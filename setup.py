@@ -15,5 +15,6 @@ setup(name='smclocalize',
           'scipy>=1.0',
           'pandas>=0.22',
           'matplotlib>=2.1',
-          'jupyter>=1.0.0'
+          'jupyter>=1.0.0',
+          'tensorflow>=1.5'
       ])

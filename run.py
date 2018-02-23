@@ -65,7 +65,7 @@ for t_index in range(num_timesteps):
 
 timestamp_range = pd.date_range(usable_data['observed_at'].min(), usable_data['observed_at'].max(), freq='10S')
 
-print np.setdiff1d(timestamp_range, timestamps)
+print(np.setdiff1d(timestamp_range, timestamps))
 
 #Room geometry
 feet_to_meters = 12*2.54/100
@@ -106,21 +106,20 @@ x_continuous_particles_trajectory = np.zeros(
 log_weights_trajectory = np.zeros(
     (num_timesteps_test, num_particles),
     dtype = 'float')
-ancestors_trajectory = np.zeros(
+ancestor_indices_trajectory = np.zeros(
     (num_timesteps_test, num_particles),
     dtype = 'int')
 
 # Generate the particles for the initial state  Xsub0
 x_discrete_particles_trajectory[0], x_continuous_particles_trajectory[0], log_weights_trajectory[0] = sensor_model.generate_initial_particles(
     y_discrete_t[0],
-    y_continuous_t[0],
-    num_particles)
+    y_continuous_t[0])
 
 # Generate the particles for all later times.
 start_time = time.time()
 for t_index in range(1, num_timesteps_test):
-    print '{}: {}'.format(t_index, t_test[t_index])
-    x_discrete_particles_trajectory[t_index], x_continuous_particles_trajectory[t_index], log_weights_trajectory[t_index], ancestors_trajectory[t_index] = sensor_model.generate_next_particles(
+    print('{}: {}'.format(t_index, t_test[t_index]))
+    x_discrete_particles_trajectory[t_index], x_continuous_particles_trajectory[t_index], log_weights_trajectory[t_index], ancestor_indices_trajectory[t_index] = sensor_model.generate_next_particles(
         x_discrete_particles_trajectory[t_index - 1],
         x_continuous_particles_trajectory[t_index - 1],
         log_weights_trajectory[t_index - 1],
@@ -134,7 +133,7 @@ print("Time per timestep: %f" % (elapsed_time / num_timesteps_test))
 
 max_weights = np.max(np.exp(log_weights_trajectory), axis=1)
 
-num_ancestors = np.array([len(np.unique(ancestors_trajectory[t_index])) for t_index in range(1, num_timesteps_test)])
+num_ancestors = np.array([len(np.unique(ancestor_indices_trajectory[t_index])) for t_index in range(1, num_timesteps_test)])
 
 x_continuous_mean_particle = np.average(
     x_continuous_particles_trajectory,
@@ -154,4 +153,4 @@ x_continuous_squared_mean_particle = np.average(
 
 x_continuous_sd_particle = np.sqrt(np.abs(x_continuous_squared_mean_particle - np.square(x_continuous_mean_particle)))
 
-print x_continuous_mean_particle
+print(x_continuous_mean_particle)

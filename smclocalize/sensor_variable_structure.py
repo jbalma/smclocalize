@@ -2,6 +2,7 @@ import numpy as np
 
 # Define a class which provides a bunch of tools for working with sensor data,
 # based on lists of entity IDs
+
 class SensorVariableStructure(object):
     def __init__(
         self,

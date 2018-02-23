@@ -1,152 +1,270 @@
 import numpy as np
-from scipy import special
-import time
+import tensorflow as tf
 
 # Define a class for a generic sequential Monte Carlo (AKA state space) model
 class SMCModel(object):
-    # We need to supply this object with functions representing the various
-    # conditional probability distributions which comprise the model as well as
-    # the number of discrete and continuous X and Y variables.
     def __init__(
         self,
-        x_initial_sample,
-        x_bar_x_previous_sample,
-        y_bar_x_sample,
-        y_bar_x_log_pdf,
         num_x_discrete_vars,
         num_x_continuous_vars,
         num_y_discrete_vars,
-        num_y_continuous_vars):
-        self.x_initial_sample = x_initial_sample
-        self.x_bar_x_previous_sample = x_bar_x_previous_sample
-        self.y_bar_x_sample = y_bar_x_sample
-        self.y_bar_x_log_pdf = y_bar_x_log_pdf
+        num_y_continuous_vars,
+        num_particles = 10000):
         self.num_x_discrete_vars = num_x_discrete_vars
         self.num_x_continuous_vars = num_x_continuous_vars
         self.num_y_discrete_vars = num_y_discrete_vars
         self.num_y_continuous_vars = num_y_continuous_vars
+        self.num_particles = num_particles
+        # Generate computational graph to support the functions below
+        self.smc_model_graph = tf.Graph()
+        with self.smc_model_graph.as_default():
+            # Generate computational graph to support generate_initial_particles()
+            self.y_discrete_initial_tensor = tf.placeholder(tf.int32, shape = (self.num_y_discrete_vars))
+            self.y_continuous_initial_tensor = tf.placeholder(tf.float32, shape = (self.num_y_continuous_vars))
+            self.x_discrete_initial_tensor, self.x_continuous_initial_tensor, self.log_weights_initial_tensor = self.create_initial_particles_tensor(
+                self.y_discrete_initial_tensor,
+                self.y_continuous_initial_tensor)
+            # Generate computational graph to support generate_next_particles()
+            self.x_discrete_previous_tensor = tf.placeholder(tf.float32, shape = (self.num_particles, self.num_x_discrete_vars))
+            self.x_continuous_previous_tensor = tf.placeholder(tf.float32, shape = (self.num_particles, self.num_x_continuous_vars))
+            self.log_weights_previous_tensor = tf.placeholder(tf.float32, shape = (self.num_particles))
+            self.t_delta_seconds_tensor = tf.placeholder(tf.float32, shape = ())
+            self.y_discrete_tensor = tf.placeholder(tf.int32, shape = (self.num_y_discrete_vars))
+            self.y_continuous_tensor = tf.placeholder(tf.float32, shape = (self.num_y_continuous_vars))
+            self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor = self.create_next_particles_tensor(
+                self.x_discrete_previous_tensor,
+                self.x_continuous_previous_tensor,
+                self.log_weights_previous_tensor,
+                self.y_discrete_tensor,
+                self.y_continuous_tensor,
+                self.t_delta_seconds_tensor)
+            # Generate computational graph to support generate_initial_simulation_timestep()
+            self.x_discrete_initial_sim_tensor, self.x_continuous_initial_sim_tensor, self.y_discrete_initial_sim_tensor, self.y_continuous_initial_sim_tensor = self.create_initial_simulation_timestep_tensor()
+            # Generate computational graph to support generate_next_simulation_timestep()
+            self.x_discrete_previous_sim_tensor = tf.placeholder(tf.int32, shape = (self.num_x_discrete_vars))
+            self.x_continuous_previous_sim_tensor = tf.placeholder(tf.float32, shape = (self.num_x_continuous_vars))
+            self.t_delta_seconds_sim_tensor = tf.placeholder(tf.float32, shape = ())
+            self.x_discrete_sim_tensor, self.x_continuous_sim_tensor, self.y_discrete_sim_tensor, self.y_continuous_sim_tensor = self.create_next_simulation_timestep_tensor(
+                self.x_discrete_previous_sim_tensor,
+                self.x_continuous_previous_sim_tensor,
+                self.t_delta_seconds_sim_tensor)
+        # Initialize session with this graph
+        self.smc_model_session = tf.Session(graph = self.smc_model_graph)
 
-    # Generates an initial set of X particles (samples) along with
-    # their weights.
+    # Functions which should come from the child class. These specify the
+    # probability distributions which define the specific model we're working
+    # with
+
+    def create_x_initial_sample_tensor(
+        self,
+        num_samples_tensor = tf.constant(1, tf.int32)):
+        raise Exception('create_x_initial_sample_tensor() called from parent SMCModel class. Should be overriden by child class.')
+
+    def create_x_bar_x_previous_sample_tensor(
+    self,
+    x_discrete_previous_tensor,
+    x_continuous_previous_tensor,
+    t_delta_seconds_tensor):
+        raise Exception('create_x_bar_x_previous_sample_tensor() called from parent SMCModel class. Should be overriden by child class.')
+
+    def create_y_bar_x_log_pdf_tensor(
+        self,
+        x_discrete_tensor,
+        x_continuous_tensor,
+        y_discrete_tensor,
+        y_continuous_tensor):
+        raise Exception('create_y_bar_x_log_pdf_tensor() called from parent SMCModel class. Should be overriden by child class.')
+
+    def create_y_bar_x_sample_tensor(
+        self,
+        x_discrete_tensor,
+        x_continuous_tensor):
+        raise Exception('create_y_bar_x_sample_tensor() called from parent SMCModel class. Should be overriden by child class.')
+
+    # Functions which are used in building the computational graph above
+
+    def create_initial_particles_tensor(
+        self,
+        y_discrete_initial_tensor,
+        y_continuous_initial_tensor):
+        num_particles_tensor = tf.constant(self.num_particles, tf.int32)
+        x_discrete_initial_tensor, x_continuous_initial_tensor = self.create_x_initial_sample_tensor(num_particles_tensor)
+        log_weights_unnormalized_initial_tensor = self.create_y_bar_x_log_pdf_tensor(
+            x_discrete_initial_tensor,
+            x_continuous_initial_tensor,
+            y_discrete_initial_tensor,
+            y_continuous_initial_tensor)
+        log_weights_initial_tensor = self.create_normalized_log_weights_tensor(
+            log_weights_unnormalized_initial_tensor)
+        return x_discrete_initial_tensor, x_continuous_initial_tensor, log_weights_initial_tensor
+
+    def create_next_particles_tensor(
+        self,
+        x_discrete_previous_tensor,
+        x_continuous_previous_tensor,
+        log_weights_previous_tensor,
+        y_discrete_tensor,
+        y_continuous_tensor,
+        t_delta_seconds_tensor):
+        ancestor_indices_tensor = self.create_ancestor_indices_tensor(log_weights_previous_tensor)
+        x_discrete_previous_resampled_tensor, x_continuous_previous_resampled_tensor = self.create_resampled_particles_tensor(
+            x_discrete_previous_tensor,
+            x_continuous_previous_tensor,
+            ancestor_indices_tensor)
+        x_discrete_tensor, x_continuous_tensor = self.create_x_bar_x_previous_sample_tensor(
+            x_discrete_previous_resampled_tensor,
+            x_continuous_previous_resampled_tensor,
+            t_delta_seconds_tensor)
+        log_weights_unnormalized_tensor = self.create_y_bar_x_log_pdf_tensor(
+            x_discrete_tensor,
+            x_continuous_tensor,
+            y_discrete_tensor,
+            y_continuous_tensor)
+        log_weights_tensor = self.create_normalized_log_weights_tensor(
+            log_weights_unnormalized_tensor)
+        return x_discrete_tensor, x_continuous_tensor, log_weights_tensor, ancestor_indices_tensor
+
+    def create_initial_simulation_timestep_tensor(
+        self):
+        num_samples_tensor = tf.constant(1, tf.int32)
+        x_discrete_initial_sim_tensor, x_continuous_initial_sim_tensor = self.create_x_initial_sample_tensor(num_samples_tensor)
+        y_discrete_initial_sim_tensor, y_continuous_initial_sim_tensor = self.create_y_bar_x_sample_tensor(
+            x_discrete_initial_sim_tensor,
+            x_continuous_initial_sim_tensor)
+        return x_discrete_initial_sim_tensor, x_continuous_initial_sim_tensor, y_discrete_initial_sim_tensor, y_continuous_initial_sim_tensor
+
+    def create_next_simulation_timestep_tensor(
+        self,
+        x_discrete_previous_tensor,
+        x_continuous_previous_tensor,
+        t_delta_seconds_tensor):
+        x_discrete_tensor, x_continuous_tensor = self.create_x_bar_x_previous_sample_tensor(
+            x_discrete_previous_tensor,
+            x_continuous_previous_tensor,
+            t_delta_seconds_tensor)
+        y_discrete_tensor, y_continuous_tensor = self.create_y_bar_x_sample_tensor(
+            x_discrete_tensor,
+            x_continuous_tensor)
+        return x_discrete_tensor, x_continuous_tensor, y_discrete_tensor, y_continuous_tensor
+
+    def create_ancestor_indices_tensor(self, log_weights_previous_tensor):
+        ancestor_indices_tensor = tf.squeeze(
+            tf.multinomial(
+                [log_weights_previous_tensor],
+                tf.shape(log_weights_previous_tensor)[0]))
+        return ancestor_indices_tensor
+
+    def create_resampled_particles_tensor(
+        self,
+        x_discrete_tensor,
+        x_continuous_tensor,
+        ancestor_indices_tensor):
+        x_discrete_resampled_tensor = tf.gather(
+            x_discrete_tensor,
+            ancestor_indices_tensor)
+        x_continuous_resampled_tensor = tf.gather(
+            x_continuous_tensor,
+            ancestor_indices_tensor)
+        return x_discrete_resampled_tensor, x_continuous_resampled_tensor
+
+    def create_normalized_log_weights_tensor(self, log_weights_unnormalized_tensor):
+        log_weights_normalized_tensor = tf.subtract(
+            log_weights_unnormalized_tensor,
+            tf.reduce_logsumexp(log_weights_unnormalized_tensor))
+        return log_weights_normalized_tensor
+
+
+    # Functions which provide the interface to this class. These functions run
+    # portions of the computational graph above to generate results
+
+    # Generate an initial set of X particles based on an initial Y value
     def generate_initial_particles(
         self,
         y_discrete_initial,
-        y_continuous_initial,
-        num_particles = 1000):
-        x_discrete_particles_initial, x_continuous_particles_initial = self.x_initial_sample(num_particles)
-        log_weights_initial = self.y_bar_x_log_pdf(
-            x_discrete_particles_initial,
-            x_continuous_particles_initial,
-            np.tile(y_discrete_initial, (num_particles, 1)),
-            np.tile(y_continuous_initial, (num_particles, 1)))
-        log_weights_initial = log_weights_initial - special.logsumexp(log_weights_initial)
-        return x_discrete_particles_initial, x_continuous_particles_initial, log_weights_initial
+        y_continuous_initial):
+        return self.smc_model_session.run(
+            [self.x_discrete_initial_tensor, self.x_continuous_initial_tensor, self.log_weights_initial_tensor],
+            feed_dict = {
+                self.y_discrete_initial_tensor: y_discrete_initial,
+                self.y_continuous_initial_tensor : y_continuous_initial})
 
-    # Generate a set of X particles and weights (along with pointers to the
-    # particles' ancestors) for the current time step based on the set of
+    # Generate a set of X particles and weights (along with indices which point
+    # to their ancestors) for the current time step based on the set of
     # particles and weights from the previous time step and a Y value from the
-    # current time step.
+    # current time step
     def generate_next_particles(
         self,
-        x_discrete_particles_previous, x_continuous_particles_previous,
+        x_discrete_previous, x_continuous_previous,
         log_weights_previous,
         y_discrete, y_continuous,
         t_delta):
-        num_particles = x_discrete_particles_previous.shape[0]
-        if __debug__:
-            start = time.clock()
-        ancestors = np.random.choice(
-            num_particles,
-            size = num_particles,
-            p = np.exp(log_weights_previous))
-        if __debug__:
-            after_ancestors = time.clock()
-        x_discrete_particles, x_continuous_particles = self.x_bar_x_previous_sample(
-            x_discrete_particles_previous[ancestors],
-            x_continuous_particles_previous[ancestors],
-            t_delta)
-        if __debug__:
-            after_transition = time.clock()
-        log_weights = self.y_bar_x_log_pdf(
-            x_discrete_particles,
-            x_continuous_particles,
-            np.tile(y_discrete, (num_particles, 1)),
-            np.tile(y_continuous, (num_particles, 1)))
-        if __debug__:
-            after_weights = time.clock()
-        log_weights = log_weights - special.logsumexp(log_weights)
-        if __debug__:
-            after_renormalize = time.clock()
-        if __debug__:
-            print ('[generate_next_particles] Anc: {:.1e} Trans: {:.1e} Wts: {:.1e} Renorm: {:.1e}'.format(
-                after_ancestors - start,
-                after_transition - after_ancestors,
-                after_weights - after_transition,
-                after_renormalize - after_weights))
-        return x_discrete_particles, x_continuous_particles, log_weights, ancestors
+        t_delta_seconds = t_delta/np.timedelta64(1, 's')
+        return self.smc_model_session.run(
+            [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor],
+            feed_dict = {
+                self.x_discrete_previous_tensor: x_discrete_previous,
+                self.x_continuous_previous_tensor : x_continuous_previous,
+                self.log_weights_previous_tensor : log_weights_previous,
+                self.y_discrete_tensor: y_discrete,
+                self.y_continuous_tensor: y_continuous,
+                self.t_delta_seconds_tensor: t_delta_seconds})
 
     # Generate an entire trajectory of X particles along with their weights and
-    # ancestors based on an entire trajectory of Y values.
+    # ancestor indices based on an entire trajectory of Y values
     def generate_particle_trajectory(
         self,
         variable_structure,
         t_trajectory,
         y_discrete_trajectory,
-        y_continuous_trajectory,
-        num_particles = 1000):
+        y_continuous_trajectory):
         num_timesteps = len(t_trajectory)
         x_discrete_particles_trajectory = np.zeros(
-            (num_timesteps, num_particles, self.num_x_discrete_vars),
+            (num_timesteps, self.num_particles, self.num_x_discrete_vars),
             dtype='int')
         x_continuous_particles_trajectory = np.zeros(
-            (num_timesteps, num_particles, self.num_x_continuous_vars),
+            (num_timesteps, self.num_particles, self.num_x_continuous_vars),
             dtype='float')
         log_weights_trajectory = np.zeros(
-            (num_timesteps, num_particles),
+            (num_timesteps, self.num_particles),
             dtype='float')
-        ancestors_trajectory = np.zeros(
-            (num_timesteps, num_particles),
+        ancestor_indices_trajectory = np.zeros(
+            (num_timesteps, self.num_particles),
             dtype='int')
         x_discrete_particles_trajectory[0], x_continuous_particles_trajectory[0], log_weights_trajectory[0] = self.generate_initial_particles(
             y_discrete_trajectory[0],
-            y_continuous_trajectory[0],
-            num_particles)
+            y_continuous_trajectory[0])
         for i in range(1, num_timesteps):
-            x_discrete_particles_trajectory[i], x_continuous_particles_trajectory[i], log_weights_trajectory[i], ancestors_trajectory[i] = self.generate_next_particles(
+            x_discrete_particles_trajectory[i], x_continuous_particles_trajectory[i], log_weights_trajectory[i], ancestor_indices_trajectory[i] = self.generate_next_particles(
                 x_discrete_particles_trajectory[i - 1],
                 x_continuous_particles_trajectory[i - 1],
                 log_weights_trajectory[i - 1],
                 y_discrete_trajectory[i],
                 y_continuous_trajectory[i],
                 t_trajectory[i] - t_trajectory[i - 1])
-        return x_discrete_particles_trajectory, x_continuous_particles_trajectory, log_weights_trajectory, ancestors_trajectory
+        return x_discrete_particles_trajectory, x_continuous_particles_trajectory, log_weights_trajectory, ancestor_indices_trajectory
 
-    # Generate the initial time step of a simulated X and Y data set.
+    # Generate the initial time step of a simulated X and Y data set
     def generate_initial_simulation_timestep(
         self):
-        x_discrete_initial, x_continuous_initial = self.x_initial_sample()
-        y_discrete_initial, y_continuous_initial = self.y_bar_x_sample(
-            x_discrete_initial,
-            x_continuous_initial)
-        return x_discrete_initial, x_continuous_initial, y_discrete_initial, y_continuous_initial
+        return self.smc_model_session.run(
+            [self.x_discrete_initial_sim_tensor, self.x_continuous_initial_sim_tensor, self.y_discrete_initial_sim_tensor, self.y_continuous_initial_sim_tensor])
 
     # Generate a single time step of simulated X and Y data based on the
-    # previous time step and a time delta.
+    # previous time step and a time delta
     def generate_next_simulation_timestep(
         self,
-        x_discrete_previous,
-        x_continuous_previous,
-        t_delta):
-        x_discrete, x_continuous = self.x_bar_x_previous_sample(
-            x_discrete_previous,
-            x_continuous_previous,
-            t_delta)
-        y_discrete, y_continuous = self.y_bar_x_sample(
-            x_discrete_previous,
-            x_continuous_previous)
-        return x_discrete, x_continuous, y_discrete, y_continuous
+        x_discrete_previous_sim,
+        x_continuous_previous_sim,
+        t_delta_sim):
+        t_delta_seconds_sim = t_delta_sim/np.timedelta64(1, 's')
+        return self.smc_model_session.run(
+            [self.x_discrete_sim_tensor, self.x_continuous_sim_tensor, self.y_discrete_sim_tensor, self.y_continuous_sim_tensor],
+            feed_dict = {
+                self.x_discrete_previous_sim_tensor: x_discrete_previous_sim,
+                self.x_continuous_previous_sim_tensor: x_continuous_previous_sim,
+                self.t_delta_seconds_sim_tensor: t_delta_seconds_sim})
 
-    # Generate an entire trajectory of simulated X and Y data.
+    # Generate an entire trajectory of simulated X and Y data
     def generate_simulation_trajectory(
         self,
         t_trajectory):
