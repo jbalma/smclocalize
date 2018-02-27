@@ -19,18 +19,42 @@ class SMCModel(object):
         self.smc_model_graph = tf.Graph()
         with self.smc_model_graph.as_default():
             # Generate computational graph to support generate_initial_particles()
-            self.y_discrete_initial_tensor = tf.placeholder(tf.int32, shape = (self.num_y_discrete_vars))
-            self.y_continuous_initial_tensor = tf.placeholder(tf.float32, shape = (self.num_y_continuous_vars))
+            self.y_discrete_initial_tensor = tf.placeholder(
+                tf.int32,
+                shape = (self.num_y_discrete_vars),
+                name='y_discrete_initial_input')
+            self.y_continuous_initial_tensor = tf.placeholder(
+                tf.float32,
+                shape = (self.num_y_continuous_vars),
+                name='y_continuous_initial_input')
             self.x_discrete_initial_tensor, self.x_continuous_initial_tensor, self.log_weights_initial_tensor = self.create_initial_particles_tensor(
                 self.y_discrete_initial_tensor,
                 self.y_continuous_initial_tensor)
             # Generate computational graph to support generate_next_particles()
-            self.x_discrete_previous_tensor = tf.placeholder(tf.float32, shape = (self.num_particles, self.num_x_discrete_vars))
-            self.x_continuous_previous_tensor = tf.placeholder(tf.float32, shape = (self.num_particles, self.num_x_continuous_vars))
-            self.log_weights_previous_tensor = tf.placeholder(tf.float32, shape = (self.num_particles))
-            self.t_delta_seconds_tensor = tf.placeholder(tf.float32, shape = ())
-            self.y_discrete_tensor = tf.placeholder(tf.int32, shape = (self.num_y_discrete_vars))
-            self.y_continuous_tensor = tf.placeholder(tf.float32, shape = (self.num_y_continuous_vars))
+            self.x_discrete_previous_tensor = tf.placeholder(
+                tf.float32,
+                shape = (self.num_particles, self.num_x_discrete_vars),
+                name='x_discrete_previous_input')
+            self.x_continuous_previous_tensor = tf.placeholder(
+                tf.float32,
+                shape = (self.num_particles, self.num_x_continuous_vars),
+                name='x_continuous_previous_input')
+            self.log_weights_previous_tensor = tf.placeholder(
+                tf.float32,
+                shape = (self.num_particles),
+                name='log_weights_previous_input')
+            self.t_delta_seconds_tensor = tf.placeholder(
+                tf.float32,
+                shape = (),
+                name='t_delta_seconds_input')
+            self.y_discrete_tensor = tf.placeholder(
+                tf.int32,
+                shape = (self.num_y_discrete_vars),
+                name='y_discrete_input')
+            self.y_continuous_tensor = tf.placeholder(
+                tf.float32,
+                shape = (self.num_y_continuous_vars),
+                name='y_continuous_input')
             self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor = self.create_next_particles_tensor(
                 self.x_discrete_previous_tensor,
                 self.x_continuous_previous_tensor,
@@ -41,9 +65,18 @@ class SMCModel(object):
             # Generate computational graph to support generate_initial_simulation_timestep()
             self.x_discrete_initial_sim_tensor, self.x_continuous_initial_sim_tensor, self.y_discrete_initial_sim_tensor, self.y_continuous_initial_sim_tensor = self.create_initial_simulation_timestep_tensor()
             # Generate computational graph to support generate_next_simulation_timestep()
-            self.x_discrete_previous_sim_tensor = tf.placeholder(tf.int32, shape = (self.num_x_discrete_vars))
-            self.x_continuous_previous_sim_tensor = tf.placeholder(tf.float32, shape = (self.num_x_continuous_vars))
-            self.t_delta_seconds_sim_tensor = tf.placeholder(tf.float32, shape = ())
+            self.x_discrete_previous_sim_tensor = tf.placeholder(
+                tf.int32,
+                shape = (self.num_x_discrete_vars),
+                name='x_discrete_previous_sim_input')
+            self.x_continuous_previous_sim_tensor = tf.placeholder(
+                tf.float32,
+                shape = (self.num_x_continuous_vars),
+                name='x_continuous_previous_sim_input')
+            self.t_delta_seconds_sim_tensor = tf.placeholder(
+                tf.float32,
+                shape = (),
+                name='t_delta_seconds_sim_input')
             self.x_discrete_sim_tensor, self.x_continuous_sim_tensor, self.y_discrete_sim_tensor, self.y_continuous_sim_tensor = self.create_next_simulation_timestep_tensor(
                 self.x_discrete_previous_sim_tensor,
                 self.x_continuous_previous_sim_tensor,
@@ -87,25 +120,33 @@ class SMCModel(object):
         self,
         y_discrete_initial_tensor,
         y_continuous_initial_tensor):
-        num_particles_tensor = tf.constant(self.num_particles, tf.int32)
-        x_discrete_initial_tensor, x_continuous_initial_tensor = self.create_x_initial_sample_tensor(num_particles_tensor)
-        log_weights_unnormalized_initial_tensor = self.create_y_bar_x_log_pdf_tensor(
-            x_discrete_initial_tensor,
-            x_continuous_initial_tensor,
-            y_discrete_initial_tensor,
-            y_continuous_initial_tensor)
-        log_weights_initial_tensor = self.create_normalized_log_weights_tensor(
-            log_weights_unnormalized_initial_tensor)
-        x_discrete_initial_tensor_reshaped = tf.reshape(
-            x_discrete_initial_tensor,
-            [self.num_particles, self.num_x_discrete_vars])
-        x_continuous_initial_tensor_reshaped = tf.reshape(
-            x_continuous_initial_tensor,
-            [self.num_particles, self.num_x_continuous_vars])
-        log_weights_initial_tensor_reshaped = tf.reshape(
-            log_weights_initial_tensor,
-            [self.num_particles])
-        return x_discrete_initial_tensor_reshaped, x_continuous_initial_tensor_reshaped, log_weights_initial_tensor_reshaped
+        with tf.name_scope('create_initial_particles'):
+            num_particles_tensor = tf.constant(
+                self.num_particles,
+                tf.int32,
+                name='num_particles')
+            x_discrete_initial_tensor, x_continuous_initial_tensor = self.create_x_initial_sample_tensor(
+                num_particles_tensor)
+            log_weights_unnormalized_initial_tensor = self.create_y_bar_x_log_pdf_tensor(
+                x_discrete_initial_tensor,
+                x_continuous_initial_tensor,
+                y_discrete_initial_tensor,
+                y_continuous_initial_tensor)
+            log_weights_initial_tensor = self.create_normalized_log_weights_tensor(
+                log_weights_unnormalized_initial_tensor)
+            x_discrete_initial_reshaped_tensor = tf.reshape(
+                x_discrete_initial_tensor,
+                [self.num_particles, self.num_x_discrete_vars],
+                name='create_x_discrete_initial_reshaped')
+            x_continuous_initial_reshaped_tensor = tf.reshape(
+                x_continuous_initial_tensor,
+                [self.num_particles, self.num_x_continuous_vars],
+                name='create_x_continuous_initial_reshaped')
+            log_weights_initial_reshaped_tensor = tf.reshape(
+                log_weights_initial_tensor,
+                [self.num_particles],
+                name='create_log_weights_initial_reshaped')
+        return x_discrete_initial_reshaped_tensor, x_continuous_initial_reshaped_tensor, log_weights_initial_reshaped_tensor
 
     def create_next_particles_tensor(
         self,
@@ -115,119 +156,152 @@ class SMCModel(object):
         y_discrete_tensor,
         y_continuous_tensor,
         t_delta_seconds_tensor):
-        ancestor_indices_tensor = self.create_ancestor_indices_tensor(log_weights_previous_tensor)
-        x_discrete_previous_resampled_tensor, x_continuous_previous_resampled_tensor = self.create_resampled_particles_tensor(
-            x_discrete_previous_tensor,
-            x_continuous_previous_tensor,
-            ancestor_indices_tensor)
-        x_discrete_tensor, x_continuous_tensor = self.create_x_bar_x_previous_sample_tensor(
-            x_discrete_previous_resampled_tensor,
-            x_continuous_previous_resampled_tensor,
-            t_delta_seconds_tensor)
-        log_weights_unnormalized_tensor = self.create_y_bar_x_log_pdf_tensor(
-            x_discrete_tensor,
-            x_continuous_tensor,
-            y_discrete_tensor,
-            y_continuous_tensor)
-        log_weights_tensor = self.create_normalized_log_weights_tensor(
-            log_weights_unnormalized_tensor)
-        ancestor_indices_tensor_reshaped = tf.reshape(
-            ancestor_indices_tensor,
-            [self.num_particles])
-        x_discrete_tensor_reshaped = tf.reshape(
-            x_discrete_tensor,
-            [self.num_particles, self.num_x_discrete_vars])
-        x_continuous_tensor_reshaped = tf.reshape(
-            x_continuous_tensor,
-            [self.num_particles, self.num_x_continuous_vars])
-        log_weights_tensor_reshaped = tf.reshape(
-            log_weights_tensor,
-            [self.num_particles])
-        return x_discrete_tensor_reshaped, x_continuous_tensor_reshaped, log_weights_tensor_reshaped, ancestor_indices_tensor_reshaped
+        with tf.name_scope('create_next_particles'):
+            ancestor_indices_tensor = self.create_ancestor_indices_tensor(
+                log_weights_previous_tensor)
+            x_discrete_previous_resampled_tensor, x_continuous_previous_resampled_tensor = self.create_resampled_particles_tensor(
+                x_discrete_previous_tensor,
+                x_continuous_previous_tensor,
+                ancestor_indices_tensor)
+            x_discrete_tensor, x_continuous_tensor = self.create_x_bar_x_previous_sample_tensor(
+                x_discrete_previous_resampled_tensor,
+                x_continuous_previous_resampled_tensor,
+                t_delta_seconds_tensor)
+            log_weights_unnormalized_tensor = self.create_y_bar_x_log_pdf_tensor(
+                x_discrete_tensor,
+                x_continuous_tensor,
+                y_discrete_tensor,
+                y_continuous_tensor)
+            log_weights_tensor = self.create_normalized_log_weights_tensor(
+                log_weights_unnormalized_tensor)
+            ancestor_indices_reshaped_tensor = tf.reshape(
+                ancestor_indices_tensor,
+                [self.num_particles],
+                name='create_ancestor_indices_reshaped')
+            x_discrete_reshaped_tensor = tf.reshape(
+                x_discrete_tensor,
+                [self.num_particles, self.num_x_discrete_vars],
+                name='create_x_discrete_reshaped')
+            x_continuous_reshaped_tensor = tf.reshape(
+                x_continuous_tensor,
+                [self.num_particles, self.num_x_continuous_vars],
+                name='create_x_continuous_reshaped')
+            log_weights_reshaped_tensor = tf.reshape(
+                log_weights_tensor,
+                [self.num_particles],
+                name='create_log_weights_reshaped')
+        return x_discrete_reshaped_tensor, x_continuous_reshaped_tensor, log_weights_reshaped_tensor, ancestor_indices_reshaped_tensor
 
     def create_initial_simulation_timestep_tensor(
         self):
-        num_samples_tensor = tf.constant(1, tf.int32)
-        x_discrete_initial_tensor, x_continuous_initial_tensor = self.create_x_initial_sample_tensor(num_samples_tensor)
-        y_discrete_initial_tensor, y_continuous_initial_tensor = self.create_y_bar_x_sample_tensor(
-            x_discrete_initial_tensor,
-            x_continuous_initial_tensor)
-        x_discrete_initial_tensor_reshaped = tf.reshape(
-            x_discrete_initial_tensor,
-            [self.num_x_discrete_vars])
-        x_continuous_initial_tensor_reshaped = tf.reshape(
-            x_continuous_initial_tensor,
-            [self.num_x_continuous_vars])
-        y_discrete_initial_tensor_reshaped = tf.reshape(
-            y_discrete_initial_tensor,
-            [self.num_y_discrete_vars])
-        y_continuous_initial_tensor_reshaped = tf.reshape(
-            y_continuous_initial_tensor,
-            [self.num_y_continuous_vars])
-        return x_discrete_initial_tensor_reshaped, x_continuous_initial_tensor_reshaped, y_discrete_initial_tensor_reshaped, y_continuous_initial_tensor_reshaped
+        with tf.name_scope('create_initial_simulation_timestep'):
+            num_samples_tensor = tf.constant(
+                1,
+                tf.int32,
+                name='num_samples')
+            x_discrete_initial_tensor, x_continuous_initial_tensor = self.create_x_initial_sample_tensor(
+                num_samples_tensor)
+            y_discrete_initial_tensor, y_continuous_initial_tensor = self.create_y_bar_x_sample_tensor(
+                x_discrete_initial_tensor,
+                x_continuous_initial_tensor)
+            x_discrete_initial_reshaped_tensor = tf.reshape(
+                x_discrete_initial_tensor,
+                [self.num_x_discrete_vars],
+                name='create_x_discrete_initial_reshaped')
+            x_continuous_initial_reshaped_tensor = tf.reshape(
+                x_continuous_initial_tensor,
+                [self.num_x_continuous_vars],
+                name='create_x_continuous_initial_reshaped')
+            y_discrete_initial_reshaped_tensor = tf.reshape(
+                y_discrete_initial_tensor,
+                [self.num_y_discrete_vars],
+                name='create_y_discrete_initial_reshaped')
+            y_continuous_initial_reshaped_tensor = tf.reshape(
+                y_continuous_initial_tensor,
+                [self.num_y_continuous_vars],
+                name='create_y_continuous_initial_reshaped')
+        return x_discrete_initial_reshaped_tensor, x_continuous_initial_reshaped_tensor, y_discrete_initial_reshaped_tensor, y_continuous_initial_reshaped_tensor
 
     def create_next_simulation_timestep_tensor(
         self,
         x_discrete_previous_tensor,
         x_continuous_previous_tensor,
         t_delta_seconds_tensor):
-        x_discrete_tensor, x_continuous_tensor = self.create_x_bar_x_previous_sample_tensor(
-            x_discrete_previous_tensor,
-            x_continuous_previous_tensor,
-            t_delta_seconds_tensor)
-        y_discrete_tensor, y_continuous_tensor = self.create_y_bar_x_sample_tensor(
-            x_discrete_tensor,
-            x_continuous_tensor)
-        x_discrete_tensor_reshaped = tf.reshape(
-            x_discrete_tensor,
-            [self.num_x_discrete_vars])
-        x_continuous_tensor_reshaped = tf.reshape(
-            x_continuous_tensor,
-            [self.num_x_continuous_vars])
-        y_discrete_tensor_reshaped = tf.reshape(
-            y_discrete_tensor,
-            [self.num_y_discrete_vars])
-        y_continuous_tensor_reshaped = tf.reshape(
-            y_continuous_tensor,
-            [self.num_y_continuous_vars])
-        return x_discrete_tensor_reshaped, x_continuous_tensor_reshaped, y_discrete_tensor_reshaped, y_continuous_tensor_reshaped
+        with tf.name_scope('create_next_simulation_timestep'):
+            x_discrete_tensor, x_continuous_tensor = self.create_x_bar_x_previous_sample_tensor(
+                x_discrete_previous_tensor,
+                x_continuous_previous_tensor,
+                t_delta_seconds_tensor)
+            y_discrete_tensor, y_continuous_tensor = self.create_y_bar_x_sample_tensor(
+                x_discrete_tensor,
+                x_continuous_tensor)
+            x_discrete_reshaped_tensor = tf.reshape(
+                x_discrete_tensor,
+                [self.num_x_discrete_vars],
+                name='create_x_discrete_reshaped')
+            x_continuous_reshaped_tensor = tf.reshape(
+                x_continuous_tensor,
+                [self.num_x_continuous_vars],
+                name='create_x_continuous_reshaped')
+            y_discrete_reshaped_tensor = tf.reshape(
+                y_discrete_tensor,
+                [self.num_y_discrete_vars],
+                name='create_y_discrete_reshaped')
+            y_continuous_reshaped_tensor = tf.reshape(
+                y_continuous_tensor,
+                [self.num_y_continuous_vars],
+                name='create_y_continuous_reshaped')
+        return x_discrete_reshaped_tensor, x_continuous_reshaped_tensor, y_discrete_reshaped_tensor, y_continuous_reshaped_tensor
 
     def create_ancestor_indices_tensor(self, log_weights_previous_tensor):
-        ancestor_indices_tensor = tf.multinomial(
-            [log_weights_previous_tensor],
-            tf.shape(log_weights_previous_tensor)[0])
-        ancestor_indices_tensor_reshaped = tf.reshape(
-            ancestor_indices_tensor,
-            [self.num_particles])
-        return ancestor_indices_tensor_reshaped
+        with tf.name_scope('create_ancestor_indices'):
+            ancestor_indices_tensor = tf.multinomial(
+                [log_weights_previous_tensor],
+                tf.shape(log_weights_previous_tensor)[0],
+                name='create_ancestor_indices')
+            ancestor_indices_reshaped_tensor = tf.reshape(
+                ancestor_indices_tensor,
+                [self.num_particles],
+                name='ancestor_indices_reshaped')
+        return ancestor_indices_reshaped_tensor
 
     def create_resampled_particles_tensor(
         self,
         x_discrete_tensor,
         x_continuous_tensor,
         ancestor_indices_tensor):
-        x_discrete_resampled_tensor = tf.gather(
-            x_discrete_tensor,
-            ancestor_indices_tensor)
-        x_continuous_resampled_tensor = tf.gather(
-            x_continuous_tensor,
-            ancestor_indices_tensor)
-        x_discrete_resampled_tensor_reshaped = tf.reshape(
-            x_discrete_resampled_tensor,
-            [self.num_particles, self.num_x_discrete_vars])
-        x_continuous_resampled_tensor_reshaped = tf.reshape(
-            x_continuous_resampled_tensor,
-            [self.num_particles, self.num_x_continuous_vars])
-        return x_discrete_resampled_tensor_reshaped, x_continuous_resampled_tensor_reshaped
+        with tf.name_scope('create_resampled_particles'):
+            x_discrete_resampled_tensor = tf.gather(
+                x_discrete_tensor,
+                ancestor_indices_tensor,
+                name='create_x_discrete_resampled')
+            x_continuous_resampled_tensor = tf.gather(
+                x_continuous_tensor,
+                ancestor_indices_tensor,
+                name='create_x_continuous_resampled')
+            x_discrete_resampled_reshaped_tensor = tf.reshape(
+                x_discrete_resampled_tensor,
+                [self.num_particles, self.num_x_discrete_vars],
+                name='create_x_discrete_resampled_reshaped')
+            x_continuous_resampled_reshaped_tensor = tf.reshape(
+                x_continuous_resampled_tensor,
+                [self.num_particles, self.num_x_continuous_vars],
+                name='create_x_continuous_resampled_reshaped')
+        return x_discrete_resampled_reshaped_tensor, x_continuous_resampled_reshaped_tensor
 
     def create_normalized_log_weights_tensor(self, log_weights_unnormalized_tensor):
-        log_weights_tensor = tf.subtract(
-            log_weights_unnormalized_tensor,
-            tf.reduce_logsumexp(log_weights_unnormalized_tensor))
-        log_weights_tensor_reshaped = tf.reshape(
-            log_weights_tensor,
-            [self.num_particles])
-        return log_weights_tensor_reshaped
+        with tf.name_scope('create_normalized_log_weights'):
+            log_weights_tensor = tf.subtract(
+                log_weights_unnormalized_tensor,
+                tf.reduce_logsumexp(
+                    log_weights_unnormalized_tensor,
+                    name='calculate_normalization_factor'),
+                name='create_log_weights')
+            log_weights_reshaped_tensor = tf.reshape(
+                log_weights_tensor,
+                [self.num_particles],
+                name='create_log_weights_reshaped')
+        return log_weights_reshaped_tensor
 
 
     # Functions which provide the interface to this class. These functions run
@@ -384,3 +458,12 @@ class SMCModel(object):
                 x_continuous_trajectory[t_index - 1],
                 t_trajectory_reshaped[t_index] - t_trajectory_reshaped[t_index - 1])
         return x_discrete_trajectory, x_continuous_trajectory, y_discrete_trajectory, y_continuous_trajectory
+
+    # These functions are just used for testing the functions above
+    def write_computational_graph(
+        self,
+        tensorflow_log_directory):
+        log_file_writer = tf.summary.FileWriter(
+            tensorflow_log_directory,
+            self.smc_model_graph)
+        log_file_writer.close()
