@@ -68,6 +68,7 @@ class SensorModel(SMCModel):
                 name='x_discrete_previous_test_input')
             self.x_continuous_previous_test_input_tensor = tf.placeholder(
                 tf.float32,
+                # shape=[self.num_particles, self.num_x_continuous_vars], # Remove this later
                 name='x_continuous_previous_test_input')
             self.t_delta_seconds_test_input_tensor = tf.placeholder(
                 tf.float32,
@@ -77,6 +78,7 @@ class SensorModel(SMCModel):
                 name='x_discrete_test_input')
             self.x_continuous_test_input_tensor = tf.placeholder(
                 tf.float32,
+                # shape=[self.num_particles, self.num_x_continuous_vars], # Remove this later
                 name='x_continuous_test_input')
             self.y_discrete_test_input_tensor = tf.placeholder(
                 tf.int32,
@@ -130,22 +132,6 @@ class SensorModel(SMCModel):
     def create_x_initial_sample_tensor(self, num_samples_tensor = tf.constant(1, tf.int32)):
         with tf.name_scope('create_x_initial_sample'):
             # Convert sensor model values to tensors
-            num_x_discrete_vars_tensor = tf.constant(
-                self.num_x_discrete_vars,
-                tf.int32,
-                name='num_x_discrete_vars')
-            num_x_continuous_vars_tensor = tf.constant(
-                self.num_x_continuous_vars,
-                tf.int32,
-                name='num_x_continuous_vars')
-            num_moving_sensors_tensor = tf.constant(
-                self.sensor_variable_structure.num_moving_sensors,
-                tf.int32,
-                name='num_moving_sensors')
-            num_dimensions_tensor = tf.constant(
-                self.sensor_variable_structure.num_dimensions,
-                tf.int32,
-                name='num_dimensions')
             room_corners_tensor = tf.constant(
                 self.room_corners,
                 tf.float32,
@@ -153,7 +139,7 @@ class SensorModel(SMCModel):
             # Generate the sample of the discrete X variables
             x_discrete_initial_tensor = tf.squeeze(
                 tf.zeros(
-                    [num_samples_tensor, num_x_discrete_vars_tensor],
+                    [num_samples_tensor, self.num_x_discrete_vars],
                     name='create_zeros_like_x_discrete'),
                 name='create_x_discrete_initial')
             # Generate the sample of the continuous X variables
@@ -162,13 +148,13 @@ class SensorModel(SMCModel):
                 high = room_corners_tensor[1],
                 name='uniform_distribution_across_room')
             initial_positions_tensor = initial_positions_distribution.sample(
-                sample_shape = [num_samples_tensor, num_moving_sensors_tensor],
+                sample_shape = [num_samples_tensor, self.sensor_variable_structure.num_moving_sensors],
                 name='create_initial_positions')
             x_continuous_initial_tensor = tf.cast(
                 tf.squeeze(
                     tf.reshape(
                         initial_positions_tensor,
-                        [num_samples_tensor, num_x_continuous_vars_tensor],
+                        [num_samples_tensor, self.num_x_continuous_vars],
                         name='reshape_initial_positions'),
                     name='squeeze_initial_positions'),
                 tf.float32,
@@ -186,10 +172,6 @@ class SensorModel(SMCModel):
                 self.room_corners,
                 tf.float32,
                 name='room_corners')
-            num_moving_sensors_tensor = tf.constant(
-                self.sensor_variable_structure.num_moving_sensors,
-                tf.int32,
-                name='num_moving_sensors')
             moving_sensor_drift_reference_tensor = tf.constant(
                 self.moving_sensor_drift_reference,
                 tf.float32,
@@ -210,30 +192,32 @@ class SensorModel(SMCModel):
                         name='calc_ratio_of_t_delta_and_reference_time'),
                     name='take_sqrt_of_ratio'),
                 name='create_moving_sensor_drift')
+            room_min_scaled = tf.divide(
+                tf.subtract(
+                    tf.tile(
+                        room_corners_tensor[0],
+                        [self.sensor_variable_structure.num_moving_sensors],
+                        name='tile_room_min'),
+                    x_continuous_previous_tensor,
+                    name='subtract_x_prev_from_room_min_tiled'),
+                moving_sensor_drift_tensor,
+                name='create_room_min_scaled')
+            room_max_scaled = tf.divide(
+                tf.subtract(
+                    tf.tile(
+                        room_corners_tensor[1],
+                        [self.sensor_variable_structure.num_moving_sensors],
+                        name='tile_room_max'),
+                    x_continuous_previous_tensor,
+                    name='subtract_x_prev_from_room_max_tiled'),
+                moving_sensor_drift_tensor,
+                name='create_room_max_scaled')
             x_continuous_tensor = tf.cast(
                 tf.reshape(
                     tf.py_func(
                         stats.truncnorm.rvs,
-                        [tf.divide(
-                            tf.subtract(
-                                tf.tile(
-                                    room_corners_tensor[0],
-                                    [num_moving_sensors_tensor],
-                                    name='tile_room_min'),
-                                x_continuous_previous_tensor,
-                                name='subtract_x_prev_from_room_min'),
-                            moving_sensor_drift_tensor,
-                            name='scale_room_min'),
-                        tf.divide(
-                            tf.subtract(
-                                tf.tile(
-                                    room_corners_tensor[1],
-                                    [num_moving_sensors_tensor],
-                                    name='tile_room_max'),
-                                x_continuous_previous_tensor,
-                                name='subtract_x_prev_from_room_min'),
-                            moving_sensor_drift_tensor,
-                            name='scale_room_max'),
+                        [room_min_scaled,
+                        room_max_scaled,
                         x_continuous_previous_tensor,
                         moving_sensor_drift_tensor],
                         tf.float64,
@@ -261,7 +245,8 @@ class SensorModel(SMCModel):
                 dtype=tf.float32,
                 name='lower_rssi_cutoff')
             # Calculate inter-sensor distances
-            distances_tensor = self.create_distances_tensor(x_continuous_tensor)
+            distances_tensor = self.create_distances_tensor(
+                x_continuous_tensor)
             # Calculate discrete probabilities
             ping_success_probabilities_tensor = self.create_ping_success_probabilities_tensor(
                 distances_tensor)
@@ -344,11 +329,11 @@ class SensorModel(SMCModel):
                     y_discrete_broadcast_tensor,
                     tf.constant(1, dtype=tf.int32),
                     name='create_ping_failure_boolean'),
-                tf.fill(
+                tf.zeros(
                     tf.shape(
                         logf_tensor,
                         name='extract_logf_shape'),
-                    np.float32(0.0),
+                    tf.float32,
                     name='create_zeros_like_logf'),
                 logf_tensor,
                 name='create_continuous_log_probability_densities')
@@ -371,10 +356,6 @@ class SensorModel(SMCModel):
         x_continuous_tensor):
         with tf.name_scope('create_y_bar_x_sample'):
             # Convert sensor model values to tensors
-            num_y_continuous_vars_tensor = tf.constant(
-                self.num_y_continuous_vars,
-                tf.int32,
-                name='num_y_continuous_vars')
             lower_rssi_cutoff_tensor = tf.constant(
                 self.lower_rssi_cutoff,
                 tf.float32,
@@ -384,7 +365,8 @@ class SensorModel(SMCModel):
                 tf.float32,
                 name='rssi_untruncated_std_dev')
             # Calculate inter-sensor distances
-            distances_tensor = self.create_distances_tensor(x_continuous_tensor)
+            distances_tensor = self.create_distances_tensor(
+                x_continuous_tensor)
             # Generate the sample of the discrete Y variables
             ping_success_probabilities_tensor = self.create_ping_success_probabilities_tensor(
                 distances_tensor)
@@ -400,7 +382,7 @@ class SensorModel(SMCModel):
                 name='create_ping_success_logits')
             ping_success_logits_reshaped_tensor = tf.reshape(
                 ping_success_logits_tensor,
-                [-1, num_y_continuous_vars_tensor, 2],
+                [-1, self.num_y_continuous_vars, 2],
                 name='create_ping_success_logits_reshaped')
             y_discrete_bar_x_sample_tensor = tf.cast(
                 tf.squeeze(
@@ -416,20 +398,25 @@ class SensorModel(SMCModel):
             # Generate the sample of the continuous Y variables
             rssi_untruncated_mean_tensor = self.create_rssi_untruncated_mean_tensor(distances_tensor)
             y_continuous_bar_x_sample_tensor = tf.cast(
-                tf.py_func(
-                    stats.truncnorm.rvs,
-                    [tf.divide(
-                        tf.subtract(
-                            lower_rssi_cutoff_tensor,
+                tf.squeeze(
+                    tf.reshape(
+                        tf.py_func(
+                            stats.truncnorm.rvs,
+                            [tf.divide(
+                                tf.subtract(
+                                    lower_rssi_cutoff_tensor,
+                                    rssi_untruncated_mean_tensor,
+                                    name='subtract_rssi_untruncated_mean_from_lower_cutoff'),
+                                rssi_untruncated_std_dev_tensor,
+                                name='divide_by_std_dev'),
+                            np.float32(np.inf),
                             rssi_untruncated_mean_tensor,
-                            name='subtract_rssi_untruncated_mean_from_lower_cutoff'),
-                        rssi_untruncated_std_dev_tensor,
-                        name='divide_by_std_dev'),
-                    np.float32(np.inf),
-                    rssi_untruncated_mean_tensor,
-                    rssi_untruncated_std_dev_tensor],
-                    tf.float64,
-                    name='create_y_continuous_bar_x_sample'),
+                            rssi_untruncated_std_dev_tensor],
+                            tf.float64,
+                            name='create_rssi_samples'),
+                        tf.shape(distances_tensor),
+                        name='reshape_rssi_samples'),
+                    name='squeeze_rssi_samples'),
                 tf.float32,
                 name='create_y_continuous_bar_x_sample')
         return y_discrete_bar_x_sample_tensor, y_continuous_bar_x_sample_tensor
@@ -440,43 +427,37 @@ class SensorModel(SMCModel):
     def create_distances_tensor(self, x_continuous_tensor):
         with tf.name_scope('create_distances'):
             # Convert sensor model values to tensors
-            num_moving_sensors_tensor = tf.constant(
-                self.sensor_variable_structure.num_moving_sensors,
-                tf.int32,
-                name='num_moving_sensors')
-            num_dimensions_tensor = tf.constant(
-                self.sensor_variable_structure.num_dimensions,
-                tf.int32,
-                name='num_dimensions')
             fixed_sensor_positions_tensor = tf.constant(
                 self.fixed_sensor_positions,
                 dtype=tf.float32,
                 name='fixed_sensor_positions')
-            extract_y_variables_mask_tensor = tf.constant(
-                self.sensor_variable_structure.extract_y_variables_mask,
-                tf.bool,
-                name='extract_y_variables_mask')
             # Calculate matrix of inter-sensor distances
-            x_continuous_samples_shape_tensor = tf.shape(
+            # Add a leading dimension of size 1 if x_continuous_tensor is of
+            # rank 1
+            x_continuous_reshaped_tensor = tf.reshape(
                 x_continuous_tensor,
-                name='extract_x_continuous_samples_shape')[:-1]
+                [-1, self.num_x_continuous_vars],
+                name='create_x_continuous_regularized')
+            # Check whether the number of x values in x_continuous_tensor is
+            # known at the time of graph creation
+            num_x_values_known = (x_continuous_reshaped_tensor.get_shape()[0].value is not None)
+            # If the number of x values in x_continuous_tensor is known at the
+            # time of graph creation, define it then. Otherwise, calculate it at
+            # runtime.
+            if num_x_values_known:
+                num_x_values = x_continuous_reshaped_tensor.get_shape()[0].value
+            else:
+                num_x_values = tf.shape(x_continuous_reshaped_tensor)[0]
             moving_sensor_positions_tensor = tf.reshape(
-                x_continuous_tensor,
-                tf.concat(
-                    [x_continuous_samples_shape_tensor, [num_moving_sensors_tensor, num_dimensions_tensor]],
-                    axis=0,
-                    name='create_moving_sensor_positions_shape'),
+                x_continuous_reshaped_tensor,
+                [-1, self.sensor_variable_structure.num_moving_sensors, self.sensor_variable_structure.num_dimensions],
                 name='create_moving_sensor_positions')
-            fixed_sensor_positions_shape_tensor = tf.shape(
-                fixed_sensor_positions_tensor,
-                name='extract_fixed_sensor_positions_shape')
+            # Broadcast fixed_sensor_positions_tensor to the shape we want by
+            # constructing a tensor of zeros in the shape we want an adding
             fixed_sensor_positions_broadcast_tensor = tf.add(
                 fixed_sensor_positions_tensor,
                 tf.zeros(
-                    tf.concat(
-                        [x_continuous_samples_shape_tensor, fixed_sensor_positions_shape_tensor],
-                        axis=0,
-                        name='create_fixed_sensor_positions_broadcast_shape'),
+                    [num_x_values, self.sensor_variable_structure.num_fixed_sensors, self.sensor_variable_structure.num_dimensions],
                     dtype=tf.float32,
                     name='create_fixed_sensor_positions_broadcast_template'),
                 name='create_fixed_sensor_positions_broadcast')
@@ -499,29 +480,30 @@ class SensorModel(SMCModel):
                 name='create_distance_matrix')
             # Extract and flatten the inter-sensor distances that correspond to
             # continuous Y variables
-            distance_matrix_indices_tensor = tf.range(
-                tf.rank(distance_matrix_tensor),
-                name='extract_distance_matrix_indices')
             distance_matrix_rolled_forward_tensor = tf.transpose(
                 distance_matrix_tensor,
-                tf.concat(
-                    [distance_matrix_indices_tensor[-2:], distance_matrix_indices_tensor[:-2]],
-                    axis=0,
-                    name='create_distance_matrix_rolled_forward_indices'),
+                [1, 2, 0],
                 name='create_distance_matrix_rolled_forward')
-            distances_rolled_forward_tensor = tf.boolean_mask(
-                distance_matrix_rolled_forward_tensor,
-                extract_y_variables_mask_tensor,
-                name='create_distances_rolled_forward')
-            distances_rolled_forward_indices_tensor = tf.range(
-                tf.rank(distances_rolled_forward_tensor),
-                name='create_distances_rolled_forward_indices')
-            distances_tensor = tf.transpose(
-                distances_rolled_forward_tensor,
-                tf.concat(
-                    [distances_rolled_forward_indices_tensor[1:], [0]],
-                    axis=0,
-                    name='create_distances_rolled_back_indices'),
+            if num_x_values_known:
+                distances_rolled_forward_tensor = tf.boolean_mask(
+                    distance_matrix_rolled_forward_tensor,
+                    self.sensor_variable_structure.extract_y_variables_mask,
+                    name='create_distances_rolled_forward')
+                distances_rolled_forward_tensor.set_shape([self.num_y_continuous_vars, num_x_values])
+            else:
+                distances_rolled_forward_unshaped_tensor = tf.boolean_mask(
+                    distance_matrix_rolled_forward_tensor,
+                    self.sensor_variable_structure.extract_y_variables_mask,
+                    name='extract_and_flatten_distances')
+                distances_rolled_forward_tensor = tf.reshape(
+                    distances_rolled_forward_unshaped_tensor,
+                    [self.num_y_continuous_vars, num_x_values],
+                    name='create_distances_rolled_forward')
+            distances_tensor = tf.squeeze(
+                tf.transpose(
+                    distances_rolled_forward_tensor,
+                    [1, 0],
+                    name='roll_back_indices'),
                 name='create_distances')
         return distances_tensor
 
@@ -593,7 +575,9 @@ class SensorModel(SMCModel):
                 self.x_continuous_previous_test_input_tensor: x_continuous_previous_test_input,
                 self.t_delta_seconds_test_input_tensor: t_delta_seconds_test_input})
 
-    def distances_test(self, x_continuous_test_input):
+    def distances_test(
+        self,
+        x_continuous_test_input):
         return self.sensor_model_testing_session.run(
             self.distances_test_output_tensor,
             feed_dict = {
@@ -625,7 +609,10 @@ class SensorModel(SMCModel):
             scale = self.rssi_untruncated_std_dev,
             moments = 'm')
 
-    def y_bar_x_sample_test(self, x_discrete_test_input, x_continuous_test_input):
+    def y_bar_x_sample_test(
+        self,
+        x_discrete_test_input,
+        x_continuous_test_input):
         return self.sensor_model_testing_session.run(
             [self.y_discrete_bar_x_sample_test_output_tensor, self.y_continuous_bar_x_sample_test_output_tensor],
             feed_dict = {

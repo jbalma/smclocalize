@@ -105,13 +105,15 @@ class SMCModel(object):
         x_discrete_tensor,
         x_continuous_tensor,
         y_discrete_tensor,
-        y_continuous_tensor):
+        y_continuous_tensor,
+        num_x_values_tensor):
         raise Exception('create_y_bar_x_log_pdf_tensor() called from parent SMCModel class. Should be overriden by child class.')
 
     def create_y_bar_x_sample_tensor(
         self,
         x_discrete_tensor,
-        x_continuous_tensor):
+        x_continuous_tensor,
+        num_x_values_tensor):
         raise Exception('create_y_bar_x_sample_tensor() called from parent SMCModel class. Should be overriden by child class.')
 
     # Functions which are used in building the computational graph above
@@ -259,6 +261,7 @@ class SMCModel(object):
                 [log_weights_previous_tensor],
                 tf.shape(log_weights_previous_tensor)[0],
                 name='create_ancestor_indices')
+            ancestor_indices_tensor.set_shape([1, self.num_particles])
             ancestor_indices_reshaped_tensor = tf.reshape(
                 ancestor_indices_tensor,
                 [self.num_particles],
@@ -460,6 +463,7 @@ class SMCModel(object):
         return x_discrete_trajectory, x_continuous_trajectory, y_discrete_trajectory, y_continuous_trajectory
 
     # These functions are just used for testing the functions above
+
     def write_computational_graph(
         self,
         tensorflow_log_directory):
@@ -467,3 +471,48 @@ class SMCModel(object):
             tensorflow_log_directory,
             self.smc_model_graph)
         log_file_writer.close()
+
+    def generate_next_particles_profile(
+        self,
+        x_discrete_previous,
+        x_continuous_previous,
+        log_weights_previous,
+        y_discrete,
+        y_continuous,
+        t_delta,
+        tensorflow_log_directory):
+        x_discrete_previous_reshaped = np.reshape(
+            x_discrete_previous,
+            (self.num_particles, self.num_x_discrete_vars))
+        x_continuous_previous_reshaped = np.reshape(
+            x_continuous_previous,
+            (self.num_particles, self.num_x_continuous_vars))
+        log_weights_previous_reshaped = np.reshape(
+            log_weights_previous,
+            (self.num_particles))
+        y_discrete_reshaped = np.reshape(
+            y_discrete,
+            (self.num_y_discrete_vars))
+        y_continuous_reshaped = np.reshape(
+            y_continuous,
+            (self.num_y_continuous_vars))
+        t_delta_seconds = t_delta/np.timedelta64(1, 's')
+        log_file_writer = tf.summary.FileWriter(
+            tensorflow_log_directory,
+            self.smc_model_graph)
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+        x_discrete, x_continuous, log_weights, ancestor_indices = self.smc_model_session.run(
+            [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor],
+            feed_dict = {
+                self.x_discrete_previous_tensor: x_discrete_previous_reshaped,
+                self.x_continuous_previous_tensor : x_continuous_previous_reshaped,
+                self.log_weights_previous_tensor : log_weights_previous_reshaped,
+                self.y_discrete_tensor: y_discrete_reshaped,
+                self.y_continuous_tensor: y_continuous_reshaped,
+                self.t_delta_seconds_tensor: t_delta_seconds},
+            options=run_options,
+            run_metadata=run_metadata)
+        log_file_writer.add_run_metadata(run_metadata, 'generate_next_particles_profile')
+        log_file_writer.close()
+        return x_discrete, x_continuous, log_weights, ancestor_indices
