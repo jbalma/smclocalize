@@ -29,7 +29,6 @@ class SensorModel(SMCModel):
         rssi_untruncated_std_dev = 5.70,
         lower_rssi_cutoff = -96.0001):
         self.sensor_variable_structure = sensor_variable_structure
-        self.num_particles = num_particles
         self.room_corners = room_corners
         self.fixed_sensor_positions = fixed_sensor_positions
         self.moving_sensor_drift_reference = moving_sensor_drift_reference
@@ -53,7 +52,7 @@ class SensorModel(SMCModel):
             self.sensor_variable_structure.num_x_continuous_vars,
             self.sensor_variable_structure.num_y_discrete_vars,
             self.sensor_variable_structure.num_y_continuous_vars,
-            self.num_particles)
+            num_particles)
 
         # Create a separate testing graph which is only used in testing the
         # various functions below (this should ultimately be moved to its own

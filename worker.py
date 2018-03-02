@@ -23,7 +23,6 @@ class LocationModelWorker:
         self.num_spinup_frames = num_spinup_frames
         self.num_particles = num_particles
 
-        self.redis_handle = redis.Redis()
 
         #Room geometry
         # TODO: fetch from firebase
@@ -32,20 +31,21 @@ class LocationModelWorker:
                               (11.0 + 9.0/12.0)*feet_to_meters])
         self.room_corners = np.array([[0.0, 0.0], room_size])
 
-        self.fixed_sensor_positions = np.array ([[(19.0 + 4.0/12.0 + 15.0/12.0 + 2.0)*feet_to_meters,
-                                             (11.0 + 9.0/12.0 - 1.0)*feet_to_meters],
-                                           [(2.0)*feet_to_meters,
-                                            (11.0 + 9.0/12.0 - 1.0)*feet_to_meters],
-                                           [(19.0 + 4.0/12.0 + 15.0/12.0 + 43.0 + 2.0/12.0 + 1.0)*feet_to_meters,
-                                            (3.0)*feet_to_meters],
-                                           [(19.0 + 4.0/12.0 + 15.0/12.0 + 15.0)*feet_to_meters,
-                                            (1.0)*feet_to_meters],
-                                            [(19.0 + 4.0/12.0 + 15.0/12.0 +3.0)*feet_to_meters,
-                                            (3.0)*feet_to_meters]])
+        self.fixed_sensor_positions = np.array ([
+            [ 6.8834,  3.2766],
+            [ 0.6096,  3.2766],
+            [ 1.6096,  4.2766],
+            [19.7358,  0.9144],
+            [10.7358,  1.9144],
+            [ 2.6096,  5.2766],
+            [19.7358,  0.9144],
+            [10.8458,  0.3048]])
 
         redis_url = os.getenv('REDIS_URL')
         if redis_url is None:
             raise ConfigError("Missing environment variable REDIS_URL. Please see README.")
+
+        self.redis_handle = redis.Redis.from_url(redis_url)
 
         firebase_url = os.getenv('FIREBASE_URL')
         if firebase_url is None:
@@ -75,6 +75,7 @@ class LocationModelWorker:
     def run(self):
         # Wait until we have 4 frames of data to look at
         dataframes = []
+        print("Fetching initial frames from redis on queue %s..." % self.input_queue)
         while len(dataframes) < 4:
             _, data = self.redis_handle.brpop(self.input_queue)
             print("data = %s" % data)
@@ -108,10 +109,16 @@ class LocationModelWorker:
                                                           teacher_entity_ids,
                                                           area_entity_ids)
 
+        print("room_corners = %s" % self.room_corners)
+
+        self.fixed_sensor_positions = self.fixed_sensor_positions[:self.variable_structure.num_fixed_sensors]
+
+        print("fixed_sensor_positions = %s" % self.fixed_sensor_positions)
         self.sensor_model = SensorModel(
             self.variable_structure,
             self.room_corners,
-            self.fixed_sensor_positions)
+            self.fixed_sensor_positions,
+            self.num_particles)
 
         self.model_state = ()
 
@@ -128,7 +135,6 @@ class LocationModelWorker:
 
         while True:
             _, data = self.redis_handle.brpop(self.input_queue)
-            print("data = %s" % data)
             frame = pd.read_json(data)
             frame_valid_time = frame['observed_at'][0]
             delta_t = frame_valid_time - previous_frame_valid_time
@@ -137,6 +143,7 @@ class LocationModelWorker:
 
     def process_frame(self, frame, frame_valid_time, delta_t, initialize = False):
         start_time = time.time()
+        print("Processing frame %s" % frame_valid_time)
         y_discrete, y_continuous = self.variable_structure.sensor_data_parse_one_timestep(frame)
         if initialize:
             self.state = ModelState(*self.sensor_model.generate_initial_particles(y_discrete, y_continuous))
@@ -159,11 +166,11 @@ class LocationModelWorker:
 
         x_continuous_sd_particle = np.sqrt(np.abs(x_continuous_squared_mean_particle - np.square(x_continuous_mean_particle)))
 
-        locations = x_continuous_mean_particle.reshape(self.variable_structure.num_sensors, self.variable_structure.num_dimensions)
-        std_deviations = x_continuous_sd_particle.reshape(self.variable_structure.num_sensors, self.variable_structure.num_dimensions)
+        locations = x_continuous_mean_particle.reshape(self.variable_structure.num_moving_sensors, self.variable_structure.num_dimensions)
+        std_deviations = x_continuous_sd_particle.reshape(self.variable_structure.num_moving_sensors, self.variable_structure.num_dimensions)
         print("*** processing time: %dms" % (int((time.time() - start_time) * 1000)))
-        print("std_deviations.shape = %s" % str(std_deviations.shape))
         self.publish_to_firebase(locations, std_deviations, frame_valid_time)
+        print("="*80)
 
     def publish_to_firebase(self, locations, std_deviations, timestamp):
         batch = self.firebase.batch()
@@ -171,7 +178,7 @@ class LocationModelWorker:
         for ((entity_type, entity_id), (x,y), (x_stddev, y_stddev)) in zip(self.entity_ids, locations, std_deviations):
             path = 'classrooms/%s/entity_locations/%s-%s-%s' % (self.classroom_id, entity_type, entity_id, timestamp)
             doc_ref = self.firebase.document(path)
-            print("%s %d: (%f, %f), std_dev" % (entity_type, entity_id, x, y))
+            print("%s %d: (%f, %f)" % (entity_type, entity_id, x, y))
             publish_location = {
                 'entityType': u'%s' % entity_type,
                 'entityId': entity_id,
@@ -182,7 +189,6 @@ class LocationModelWorker:
                 'timestamp': timestamp
             }
             batch.set(doc_ref, publish_location)
-            print("location doc = %s" % publish_location)
 
         batch.commit()
 
