@@ -1,14 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 import numpy as np
 from argparse import ArgumentParser
 import pandas as pd
 import redis
 import time, os, sys
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 from smclocalize import *
 import firebase_admin
 from firebase_admin import firestore
 import pytz
+import sensei
 
 
 ModelState = namedtuple("ModelState", "x_discrete_particles x_continuous_particles log_weights")
@@ -18,40 +19,19 @@ class ConfigError(ValueError):
 
 
 class LocationModelWorker:
-    def __init__(self, classroom_id, num_particles, num_spinup_frames):
+    def __init__(self, classroom_id, num_particles):
         self.classroom_id = classroom_id
-        self.num_spinup_frames = num_spinup_frames
         self.num_particles = num_particles
-
-
-        #Room geometry
-        # TODO: fetch from firebase
-        feet_to_meters = 12*2.54/100
-        room_size = np.array([(19.0 + 4.0/12.0 + 15.0/12.0 + 43.0 + 2.0/12.0 + 2.0)*feet_to_meters,
-                              (11.0 + 9.0/12.0)*feet_to_meters])
-        self.room_corners = np.array([[0.0, 0.0], room_size])
-
-        self.fixed_sensor_positions = np.array ([
-            [ 6.8834,  3.2766],
-            [ 0.6096,  3.2766],
-            [ 1.6096,  4.2766],
-            [19.7358,  0.9144],
-            [10.7358,  1.9144],
-            [ 2.6096,  5.2766],
-            [19.7358,  0.9144],
-            [10.8458,  0.3048]])
 
         redis_url = os.getenv('REDIS_URL')
         if redis_url is None:
             raise ConfigError("Missing environment variable REDIS_URL. Please see README.")
-
         self.redis_handle = redis.Redis.from_url(redis_url)
+        self.input_queue = 'radio_obs_classroom_%d' % self.classroom_id
 
         firebase_url = os.getenv('FIREBASE_URL')
         if firebase_url is None:
             raise ConfigError("Missing environment variable FIREBASE_URL. Please see README.")
-
-        self.input_queue = 'radio_obs_classroom_%d' % classroom_id
 
         credentials_certificate = firebase_admin.credentials.Certificate({
             'private_key': os.getenv('FIREBASE_PRIVATE_KEY', False),
@@ -72,25 +52,26 @@ class LocationModelWorker:
         self.firebase = firebase_admin.firestore.client();
 
 
-    def run(self):
-        # Wait until we have 4 frames of data to look at
-        dataframes = []
-        print("Fetching initial frames from redis on queue %s..." % self.input_queue)
-        while len(dataframes) < 4:
-            _, data = self.redis_handle.brpop(self.input_queue)
-            print("data = %s" % data)
-            dataframes.append(pd.read_json(data))
+        #Room geometry
+        # TODO: fetch from firebase
+        feet_to_meters = 12*2.54/100
+        room_size = np.array([(19.0 + 4.0/12.0 + 15.0/12.0 + 43.0 + 2.0/12.0 + 2.0)*feet_to_meters,
+                              (11.0 + 9.0/12.0)*feet_to_meters])
+        print("room_size = %s" % room_size)
+        room_corners = np.array([[0.0, 0.0], room_size])
+        print("room_corners = %s" % room_corners)
 
-        initial_frames = pd.concat(dataframes, ignore_index = True)
 
-        child_entity_ids = np.union1d(pd.unique(initial_frames[initial_frames.local_type == 'child'].local_id),
-                                      pd.unique(initial_frames[initial_frames.remote_type == 'child'].remote_id)).tolist()
-        material_entity_ids = np.union1d(pd.unique(initial_frames[initial_frames.local_type == 'material'].local_id),
-                                         pd.unique(initial_frames[initial_frames.remote_type == 'material'].remote_id)).tolist()
-        teacher_entity_ids = np.union1d(pd.unique(initial_frames[initial_frames.local_type == 'teacher'].local_id),
-                                        pd.unique(initial_frames[initial_frames.remote_type == 'teacher'].remote_id)).tolist()
-        area_entity_ids = np.union1d(pd.unique(initial_frames[initial_frames.local_type == 'area'].local_id),
-                                     pd.unique(initial_frames[initial_frames.remote_type == 'area'].remote_id)).tolist()
+        sensei_api = sensei.Api(username=os.getenv('SENSEI_USERNAME'), password=os.getenv('SENSEI_PASSWORD'))
+        mappings = sensei_api.get_sensor_mappings(classroom_id)
+        entities = defaultdict(list)
+        for mapping in mappings:
+            entities[mapping.entity_type.value].append(mapping)
+
+        child_entity_ids = [entity.entity_id for entity in entities['child']]
+        material_entity_ids = [entity.entity_id for entity in entities['material']]
+        teacher_entity_ids = [entity.entity_id for entity in entities['teacher']]
+        area_entity_ids = [entity.entity_id for entity in entities['area']]
 
         print("child_entity_ids = %s" % child_entity_ids)
         print("material_entity_ids = %s" % material_entity_ids)
@@ -103,49 +84,58 @@ class LocationModelWorker:
             [['teacher', id] for id in teacher_entity_ids] +
             [['area', id] for id in area_entity_ids])
 
-
         self.variable_structure = SensorVariableStructure(child_entity_ids,
                                                           material_entity_ids,
                                                           teacher_entity_ids,
                                                           area_entity_ids)
 
-        print("room_corners = %s" % self.room_corners)
+        areas_by_id = {area.entity_id: area for area in sensei_api.get_areas(classroom_id)}
 
-        self.fixed_sensor_positions = self.fixed_sensor_positions[:self.variable_structure.num_fixed_sensors]
+        area_positions = []
 
-        print("fixed_sensor_positions = %s" % self.fixed_sensor_positions)
+        room_center = room_size / 2
+        for area_id in area_entity_ids:
+            area = areas_by_id.get(area_id)
+            if area and area.position_x and area.position_y:
+                position = [area.position_x, area.position_y]
+            else:
+                position = room_center
+            area_positions.append(position)
+
+        fixed_sensor_positions = np.array(area_positions)
+        print("fixed_sensor_positions = %s" % fixed_sensor_positions)
+
         self.sensor_model = SensorModel(
             self.variable_structure,
-            self.room_corners,
-            self.fixed_sensor_positions,
+            room_corners,
+            fixed_sensor_positions,
             self.num_particles)
 
+
+    def run(self):
         self.model_state = ()
 
         # Run the model on the first frames
         previous_frame_valid_time = None
-        for i in range(self.num_spinup_frames):
-            frame_valid_time = dataframes[i]['observed_at'][0]
-            if not previous_frame_valid_time:
-                delta_t = 0
-            else:
-                delta_t = frame_valid_time - previous_frame_valid_time
-            locations = self.process_frame(dataframes[i], frame_valid_time, delta_t, i==0)
-            previous_frame_valid_time = frame_valid_time
 
         while True:
             _, data = self.redis_handle.brpop(self.input_queue)
             frame = pd.read_json(data)
             frame_valid_time = frame['observed_at'][0]
-            delta_t = frame_valid_time - previous_frame_valid_time
-            locations = self.process_frame(frame, frame_valid_time, delta_t, i==0)
+            if previous_frame_valid_time:
+                delta_t = frame_valid_time - previous_frame_valid_time
+                initial_frame = False
+            else:
+                delta_t = 0
+                initial_frame = True
+            locations = self.process_frame(frame, frame_valid_time, delta_t, initial_frame)
             previous_frame_valid_time = frame_valid_time
 
-    def process_frame(self, frame, frame_valid_time, delta_t, initialize = False):
+    def process_frame(self, frame, frame_valid_time, delta_t, initial_frame = False):
         start_time = time.time()
         print("Processing frame %s" % frame_valid_time)
         y_discrete, y_continuous = self.variable_structure.sensor_data_parse_one_timestep(frame)
-        if initialize:
+        if initial_frame:
             self.state = ModelState(*self.sensor_model.generate_initial_particles(y_discrete, y_continuous))
         else:
             self.state = ModelState(*self.sensor_model.generate_next_particles(*self.state, y_discrete, y_continuous, delta_t)[:3])
@@ -197,12 +187,11 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("-c", "--classroom_id", dest="classroom_id", required=True, type=int, help="Classroom ID")
     parser.add_argument("-n", "--num_particles", dest="num_particles", type=int, default=10000, help="Number of particles to use in the model")
-    parser.add_argument("-f", "--num_spinup_frames", dest="num_spinup_frames", type=int, default=4, help="Number of frames to wait before assuming sensor list is sufficient.")
 
     options = parser.parse_args()
 
     try:
-        worker = LocationModelWorker(options.classroom_id, options.num_particles, options.num_spinup_frames)
+        worker = LocationModelWorker(options.classroom_id, options.num_particles)
         worker.run()
     except ConfigError as error:
         sys.exit(error)

@@ -30,6 +30,8 @@ export FIREBASE_CLIENT_ID="2054719480194382340"
 export FIREBASE_CLIENT_X509_CERT_URL="https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-dn9oq%40project.iam.gserviceaccount.com"
 export REDIS_URL="redis://localhost:6379"
 export FIREBASE_URL="https://myproject.firebaseio.com"
+export SENSEI_USERNAME="someusername"
+export SENSEI_PASSWORD="somepassword"
 ```
 
 To set the environment variables from the file, `source .myenv`
