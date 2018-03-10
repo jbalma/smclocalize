@@ -5,4 +5,5 @@ data
 notes.txt
 venv
 smclocalize.egg-info
+scratch
 .*
