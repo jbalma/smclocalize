@@ -45,9 +45,9 @@ class SensorVariableStructure(object):
         # We don't track the positions of fixed sensors.
         self.extract_x_variables_mask[self.num_moving_sensors:,:] = False
 
-        # Define the number of discrete and continuous x variables using this
-        # mask. This is the key information needed by the SMC model functions.
-        self.num_x_discrete_vars = 0
+        # Define the number of discrete and continuous x variables. This is the
+        # key information needed by the SMC model functions.
+        self.num_x_discrete_vars = self.num_sensors
         self.num_x_continuous_vars = np.sum(self.extract_x_variables_mask)
 
         # Define a Boolean mask which help us extract and flatten Y values from
@@ -94,7 +94,7 @@ class SensorVariableStructure(object):
         self.dimension_names_all = ['$l$', '$w$', '$h']
         self.dimension_names = self.dimension_names_all[:self.num_dimensions]
 
-        self.x_discrete_names = []
+        self.x_discrete_names = ['{} status'.format(sensor_name) for sensor_name in self.sensor_names]
         self.sensor_position_name_matrix = [[
             '{} {} position'.format(sensor_name, dimension_name)
             for dimension_name in self.dimension_names]
@@ -136,6 +136,22 @@ class SensorVariableStructure(object):
             y_discrete_all_sensors[remote_idx, local_idx] = 0
             y_continuous_all_sensors[remote_idx, local_idx] = dataframe.iloc[row]['rssi']
         return self.extract_y_variables(y_discrete_all_sensors), self.extract_y_variables(y_continuous_all_sensors)
+
+    # Parse a dataframe containing a single time step of ping data but keep the
+    # data in matrix form
+    def sensor_data_all_sensors_one_timestep(self, dataframe):
+        y_discrete_all_sensors = np.ones(
+            (self.num_sensors, self.num_sensors),
+            dtype='int')
+        y_continuous_all_sensors = np.zeros(
+            (self.num_sensors, self.num_sensors),
+            dtype='float')
+        for row in range(len(dataframe)):
+            remote_idx = self.entity_id_index.get(dataframe.iloc[row]['remote_type'] + '_' + str(dataframe.iloc[row]['remote_id']))
+            local_idx = self.entity_id_index.get(dataframe.iloc[row]['local_type'] + '_' + str(dataframe.iloc[row]['local_id']))
+            y_discrete_all_sensors[remote_idx, local_idx] = 0
+            y_continuous_all_sensors[remote_idx, local_idx] = dataframe.iloc[row]['rssi']
+        return y_discrete_all_sensors, y_continuous_all_sensors
 
     # Parse a dataframe containing multiple time steps of ping data
     def sensor_data_parse_multiple_timesteps(self, dataframe):

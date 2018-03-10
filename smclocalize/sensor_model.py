@@ -19,6 +19,11 @@ class SensorModel(SMCModel):
         room_corners,
         fixed_sensor_positions,
         num_particles = 10000,
+        initial_status_on_probability = 0.9,
+        status_on_to_off_probability = 0.01,
+        status_off_to_on_probability = 0.01,
+        ping_success_probability_sensor_on = 0.999,
+        ping_success_probability_sensor_off = 0.001,
         moving_sensor_drift_reference = 1.0,
         reference_time_delta = np.timedelta64(10, 's'),
         ping_success_probability_zero_distance = 1.0,
@@ -31,6 +36,11 @@ class SensorModel(SMCModel):
         self.sensor_variable_structure = sensor_variable_structure
         self.room_corners = room_corners
         self.fixed_sensor_positions = fixed_sensor_positions
+        self.initial_status_on_probability = initial_status_on_probability
+        self.status_on_to_off_probability = status_on_to_off_probability
+        self.status_off_to_on_probability = status_off_to_on_probability
+        self.ping_success_probability_sensor_on = ping_success_probability_sensor_on
+        self.ping_success_probability_sensor_off = ping_success_probability_sensor_off
         self.moving_sensor_drift_reference = moving_sensor_drift_reference
         self.reference_time_delta = reference_time_delta
         self.ping_success_probability_zero_distance = ping_success_probability_zero_distance
@@ -68,7 +78,6 @@ class SensorModel(SMCModel):
                 name='x_discrete_previous_test_input')
             self.x_continuous_previous_test_input_tensor = tf.placeholder(
                 tf.float32,
-                # shape=[self.num_particles, self.num_x_continuous_vars], # Remove this later
                 name='x_continuous_previous_test_input')
             self.t_delta_seconds_test_input_tensor = tf.placeholder(
                 tf.float32,
@@ -78,7 +87,6 @@ class SensorModel(SMCModel):
                 name='x_discrete_test_input')
             self.x_continuous_test_input_tensor = tf.placeholder(
                 tf.float32,
-                # shape=[self.num_particles, self.num_x_continuous_vars], # Remove this later
                 name='x_continuous_test_input')
             self.y_discrete_test_input_tensor = tf.placeholder(
                 tf.int32,
@@ -100,16 +108,14 @@ class SensorModel(SMCModel):
             self.distances_test_output_tensor = self.create_distances_tensor(
                 self.x_continuous_test_input_tensor)
 
-            self.ping_success_probabilities_test_output_tensor = self.create_ping_success_probabilities_tensor(self.distances_test_input_tensor)
+            self.ping_success_probabilities_test_output_tensor = self.create_ping_success_probabilities_tensor(
+                self.x_discrete_test_input_tensor,
+                self.distances_test_input_tensor)
 
-            self.ping_failure_probabilities_test_output_tensor = tf.subtract(
-                tf.constant(1.0, dtype=tf.float32),
-                self.ping_success_probabilities_test_output_tensor,
-                name='create_ping_failure_probabilities_test_output')
-            self.ping_success_probabilities_array_test_output_tensor = tf.stack(
-                [self.ping_success_probabilities_test_output_tensor, self.ping_failure_probabilities_test_output_tensor],
-                axis=-1,
-                name='create_ping_success_probabilities_array_test_output')
+            self.ping_success_probabilities_from_sensor_statuses_test_output_tensor = self.create_ping_success_probabilities_from_sensor_statuses_tensor(
+                self.x_discrete_test_input_tensor)
+
+            self.ping_success_probabilities_from_distances_test_output_tensor = self.create_ping_success_probabilities_from_distances_tensor(self.distances_test_input_tensor)
 
             self.rssi_untruncated_mean_test_output_tensor = self.create_rssi_untruncated_mean_tensor(self.distances_test_input_tensor)
 
@@ -137,11 +143,15 @@ class SensorModel(SMCModel):
                 tf.float32,
                 name='room_corners')
             # Generate the sample of the discrete X variables
+            initial_statuses_distribution = tf.distributions.Bernoulli(
+                probs =  1 - self.initial_status_on_probability,
+                dtype = tf.int32,
+                name = 'bernoulli_distribution')
             x_discrete_initial_tensor = tf.squeeze(
-                tf.zeros(
-                    [num_samples_tensor, self.num_x_discrete_vars],
-                    name='create_zeros_like_x_discrete'),
-                name='create_x_discrete_initial')
+                initial_statuses_distribution.sample(
+                    sample_shape = [num_samples_tensor, self.num_x_discrete_vars],
+                    name = 'calculate_sensor_status_probabilities'),
+                name = 'create_x_discrete_initial_tensor')
             # Generate the sample of the continuous X variables
             initial_positions_distribution = tf.distributions.Uniform(
                 low = room_corners_tensor[0],
@@ -181,7 +191,42 @@ class SensorModel(SMCModel):
                 tf.float32,
                 name='reference_time_delta_seconds')
             # Generate the sample of the discrete X variables
-            x_discrete_tensor = x_discrete_previous_tensor
+            x_discrete_previous_shape_tensor = tf.shape(x_discrete_previous_tensor)
+            status_on_previous_tensor = tf.logical_not(
+                tf.cast(
+                    x_discrete_previous_tensor,
+                    tf.bool,
+                    name='convert_x_discrete_to_boolean'),
+                name='create_status_on_previous_tensor')
+            status_change_probabilities_tensor = tf.where(
+                status_on_previous_tensor,
+                tf.fill(
+                    x_discrete_previous_shape_tensor,
+                    self.status_on_to_off_probability,
+                    name='fill_on_to_off_probabilities'),
+                tf.fill(
+                    x_discrete_previous_shape_tensor,
+                    self.status_off_to_on_probability,
+                    name='fill_off_to_on_probabilities'),
+                name='create_status_change_probabilities_tensor')
+            status_change_distribution = tf.distributions.Bernoulli(
+                probs = status_change_probabilities_tensor,
+                dtype = tf.bool,
+                name = 'bernoulli_distribution')
+            status_changed_tensor = status_change_distribution.sample(
+                name='create_status_changed_tensor')
+            status_on_tensor = tf.logical_xor(
+                status_on_previous_tensor,
+                status_changed_tensor,
+                name='create_status_on_tensor')
+            x_discrete_tensor = tf.squeeze(
+                tf.cast(
+                    tf.logical_not(
+                        status_on_tensor,
+                        name='calc_status_off_tensor'),
+                    tf.int32,
+                    name='cast_status_off_tensor_to_int'),
+                name='create_x_discrete_tensor')
             # Generate the sample of the continuous X variables
             moving_sensor_drift_tensor = tf.multiply(
                 moving_sensor_drift_reference_tensor,
@@ -248,12 +293,9 @@ class SensorModel(SMCModel):
             distances_tensor = self.create_distances_tensor(
                 x_continuous_tensor)
             # Calculate discrete probabilities
-            ping_success_probabilities_tensor = self.create_ping_success_probabilities_tensor(
+            ping_success_probabilities_tensor, ping_failure_probabilities_tensor = self.create_ping_success_probabilities_tensor(
+                x_discrete_tensor,
                 distances_tensor)
-            ping_failure_probabilities_tensor = tf.subtract(
-                tf.constant(1.0, dtype=tf.float32),
-                ping_success_probabilities_tensor,
-                name='create_ping_failure_probabilities')
             y_discrete_broadcast_tensor = tf.add(
                 y_discrete_tensor,
                 tf.zeros_like(
@@ -368,12 +410,9 @@ class SensorModel(SMCModel):
             distances_tensor = self.create_distances_tensor(
                 x_continuous_tensor)
             # Generate the sample of the discrete Y variables
-            ping_success_probabilities_tensor = self.create_ping_success_probabilities_tensor(
+            ping_success_probabilities_tensor, ping_failure_probabilities_tensor = self.create_ping_success_probabilities_tensor(
+                x_discrete_tensor,
                 distances_tensor)
-            ping_failure_probabilities_tensor = tf.subtract(
-                tf.constant(1.0, dtype=tf.float32),
-                ping_success_probabilities_tensor,
-                name='create_ping_failure_probabilities')
             ping_success_logits_tensor = tf.log(
                 tf.stack(
                     [ping_success_probabilities_tensor, ping_failure_probabilities_tensor],
@@ -384,17 +423,20 @@ class SensorModel(SMCModel):
                 ping_success_logits_tensor,
                 [-1, self.num_y_continuous_vars, 2],
                 name='create_ping_success_logits_reshaped')
-            y_discrete_bar_x_sample_tensor = tf.cast(
+            ping_success_samples_tensor = tf.cast(
                 tf.squeeze(
                     tf.map_fn(
                         lambda logits_tensor: tf.transpose(
                             tf.multinomial(logits_tensor, num_samples = 1)),
                         ping_success_logits_reshaped_tensor,
                         dtype=tf.int64,
-                        name='create_ping_success_samples'),
+                        name='create_ping_success_samples_before_casting'),
                     name='squeeze_ping_success_samples'),
                 tf.int32,
-                name='create_y_discrete_bar_x_sample')
+                name='create_ping_success_samples')
+            y_discrete_bar_x_sample_tensor = tf.squeeze(
+                ping_success_samples_tensor,
+                name = 'create_y_discrete_bar_x_sample')
             # Generate the sample of the continuous Y variables
             rssi_untruncated_mean_tensor = self.create_rssi_untruncated_mean_tensor(distances_tensor)
             y_continuous_bar_x_sample_tensor = tf.cast(
@@ -509,8 +551,113 @@ class SensorModel(SMCModel):
 
     def create_ping_success_probabilities_tensor(
         self,
+        x_discrete_tensor,
         distances_tensor):
         with tf.name_scope('create_ping_success_probabilities'):
+            ping_success_probabilities_from_distances_tensor = self.create_ping_success_probabilities_from_distances_tensor(
+                distances_tensor)
+            ping_success_probabilities_from_sensor_statuses_tensor = self.create_ping_success_probabilities_from_sensor_statuses_tensor(
+                x_discrete_tensor)
+            ping_success_probabilities_tensor = tf.multiply(
+                ping_success_probabilities_from_distances_tensor,
+                ping_success_probabilities_from_sensor_statuses_tensor,
+                name='create_ping_success_probabilities')
+            ping_failure_probabilities_tensor = tf.subtract(
+                tf.constant(1.0, dtype=tf.float32),
+                ping_success_probabilities_tensor,
+                name='create_ping_failure_probabilities')
+            return ping_success_probabilities_tensor, ping_failure_probabilities_tensor
+
+    def create_ping_success_probabilities_from_sensor_statuses_tensor(
+        self,
+        x_discrete_tensor):
+        with tf.name_scope('create_ping_success_probabilities_from_sensor_statuses'):
+            # Convert sensor model values to tensors
+            ping_success_probability_sensor_on_tensor = tf.constant(
+                self.ping_success_probability_sensor_on,
+                tf.float32,
+                name='ping_success_probability_sensor_on')
+            ping_success_probability_sensor_off_tensor = tf.constant(
+                self.ping_success_probability_sensor_off,
+                tf.float32,
+                name='ping_success_probability_sensor_on')
+            # Add a leading dimension of size 1 if x_discrete_tensor is of
+            # rank 1
+            x_discrete_reshaped_tensor = tf.reshape(
+                x_discrete_tensor,
+                [-1, self.num_x_discrete_vars],
+                name='create_x_continuous_reshaped')
+            # Check whether the number of x values in x_discrete_tensor is
+            # known at the time of graph creation
+            num_x_values_known = (x_discrete_reshaped_tensor.get_shape()[0].value is not None)
+            # If the number of x values in x_discrete_tensor is known at the
+            # time of graph creation, define it then. Otherwise, calculate it at
+            # runtime.
+            if num_x_values_known:
+                num_x_values = x_discrete_reshaped_tensor.get_shape()[0].value
+            else:
+                num_x_values = tf.shape(x_discrete_reshaped_tensor)[0]
+            sensors_on_tensor = tf.logical_not(
+                tf.cast(
+                    x_discrete_reshaped_tensor,
+                    tf.bool,
+                    name='convert_x_discrete_regularized_to_boolean'),
+                name='create_sensors_on')
+            sensor_pairs_on_matrix_tensor = tf.logical_and(
+                tf.expand_dims(
+                    sensors_on_tensor,
+                    axis = -2,
+                    name='sensor_pair_on_matrix_copy_1'),
+                tf.expand_dims(
+                    sensors_on_tensor,
+                    axis=-1,
+                    name='sensor_pairs_on_matrix_copy_2'),
+                name='create_sensor_pairs_on_matrix')
+            # Extract and flatten the sensor pair statuses that correspond to Y
+            # variables
+            sensor_pairs_on_matrix_rolled_forward_tensor = tf.transpose(
+                sensor_pairs_on_matrix_tensor,
+                [1, 2, 0],
+                name='create_sensor_pairs_on_matrix_rolled_forward')
+            if num_x_values_known:
+                sensor_pairs_on_rolled_forward_tensor = tf.boolean_mask(
+                    sensor_pairs_on_matrix_rolled_forward_tensor,
+                    self.sensor_variable_structure.extract_y_variables_mask,
+                    name='extract_and_flatten_sensor_pairs_on')
+                sensor_pairs_on_rolled_forward_tensor.set_shape([self.num_y_discrete_vars, num_x_values])
+            else:
+                sensor_pairs_on_rolled_forward_unshaped_tensor = tf.boolean_mask(
+                    sensor_pairs_on_matrix_rolled_forward_tensor,
+                    self.sensor_variable_structure.extract_y_variables_mask,
+                    name='extract_and_flatten_sensor_pairs_on')
+                sensor_pairs_on_rolled_forward_tensor = tf.reshape(
+                    sensor_pairs_on_rolled_forward_unshaped_tensor,
+                    [self.num_y_discrete_vars, num_x_values],
+                    name='create_sensor_pairs_on_rolled_forward')
+            sensor_pairs_on_tensor = tf.transpose(
+                sensor_pairs_on_rolled_forward_tensor,
+                [1, 0],
+                name='create_sensor_pairs_on')
+            ping_success_probabilities_from_sensor_statuses_reshaped_tensor = tf.where(
+                sensor_pairs_on_tensor,
+                tf.fill(
+                    [num_x_values, self.num_y_discrete_vars],
+                    ping_success_probability_sensor_on_tensor,
+                    name='fill_ping_success_probability_sensor_on'),
+                tf.fill(
+                    [num_x_values, self.num_y_discrete_vars],
+                    ping_success_probability_sensor_off_tensor,
+                    name='fill_ping_success_probability_sensor_off'),
+                name='create_ping_success_probabilities_from_sensor_statuses_reshaped')
+            ping_success_probabilities_from_sensor_statuses_tensor = tf.squeeze(
+                ping_success_probabilities_from_sensor_statuses_reshaped_tensor,
+                name='create_ping_success_probabilities_from_sensor_statuses')
+        return ping_success_probabilities_from_sensor_statuses_tensor
+
+    def create_ping_success_probabilities_from_distances_tensor(
+        self,
+        distances_tensor):
+        with tf.name_scope('create_ping_success_probabilities_from_distances'):
             # Convert sensor model values to tensors
             ping_success_probability_zero_distance_tensor = tf.constant(
                 self.ping_success_probability_zero_distance,
@@ -521,7 +668,7 @@ class SensorModel(SMCModel):
                 dtype=tf.float32,
                 name='scale_factor')
             # Calculate ping success probabilties
-            ping_success_probabilities_tensor = tf.multiply(
+            ping_success_probabilities_from_distances_tensor = tf.multiply(
                 ping_success_probability_zero_distance_tensor,
                 tf.exp(
                     tf.divide(
@@ -529,8 +676,8 @@ class SensorModel(SMCModel):
                         scale_factor_tensor,
                         name='divide_distances_by_scale_factor'),
                     name='calc_ping_success_probability_scale_factor'),
-                name='create_ping_success_probabilities')
-        return ping_success_probabilities_tensor
+                name='create_ping_success_probabilities_from_distances')
+        return ping_success_probabilities_from_distances_tensor
 
     def create_rssi_untruncated_mean_tensor(
         self,
@@ -583,15 +730,27 @@ class SensorModel(SMCModel):
             feed_dict = {
                 self.x_continuous_test_input_tensor: x_continuous_test_input})
 
-    def ping_success_probabilities_test(self, distances_test_input):
+    def ping_success_probabilities_test(
+        self,
+        x_discrete_test_input,
+        distances_test_input):
         return self.sensor_model_testing_session.run(
             self.ping_success_probabilities_test_output_tensor,
             feed_dict = {
+                self.x_discrete_test_input_tensor: x_discrete_test_input,
                 self.distances_test_input_tensor: distances_test_input})
 
-    def ping_success_probabilities_array_test(self, distances_test_input):
+    def ping_success_probabilities_from_sensor_statuses_test(
+        self,
+        x_discrete_test_input):
         return self.sensor_model_testing_session.run(
-            self.ping_success_probabilities_array_test_output_tensor,
+            self.ping_success_probabilities_from_sensor_statuses_test_output_tensor,
+            feed_dict = {
+                self.x_discrete_test_input_tensor: x_discrete_test_input})
+
+    def ping_success_probabilities_from_distances_test(self, distances_test_input):
+        return self.sensor_model_testing_session.run(
+            self.ping_success_probabilities_from_distances_test_output_tensor,
             feed_dict = {
                 self.distances_test_input_tensor: distances_test_input})
 

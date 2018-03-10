@@ -188,6 +188,10 @@ class SMCModel(object):
                 x_continuous_tensor,
                 [self.num_particles, self.num_x_continuous_vars],
                 name='create_x_continuous_reshaped')
+            log_weights_unnormalized_reshaped_tensor = tf.reshape(
+                log_weights_unnormalized_tensor,
+                [self.num_particles],
+                name='create_log_weights_reshaped')
             log_weights_reshaped_tensor = tf.reshape(
                 log_weights_tensor,
                 [self.num_particles],
@@ -339,6 +343,8 @@ class SMCModel(object):
         y_discrete,
         y_continuous,
         t_delta):
+        if np.all(np.logical_not(np.isfinite(log_weights_previous))):
+            raise Exception('All particles have zero weight.')
         x_discrete_previous_reshaped = np.reshape(
             x_discrete_previous,
             (self.num_particles, self.num_x_discrete_vars))
