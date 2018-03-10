@@ -49,14 +49,16 @@ class LocationModelWorker:
         firebase_admin.initialize_app(credentials_certificate, options={
             'databaseURL': firebase_url
         })
-        self.firebase = firebase_admin.firestore.client();
+        self.firebase = firebase_admin.firestore.client()
 
+        classroom_doc = self.firebase.document('classrooms/%d' % self.classroom_id)
+        classroom_doc_snapshot = classroom_doc.get(['width', 'length'])
+        width = classroom_doc_snapshot.get('width')
+        length = classroom_doc_snapshot.get('length')
+        print("Width from firebase = (width:%s, length:%s)" % (width, length))
 
         #Room geometry
-        # TODO: fetch from firebase
-        feet_to_meters = 12*2.54/100
-        room_size = np.array([(19.0 + 4.0/12.0 + 15.0/12.0 + 43.0 + 2.0/12.0 + 2.0)*feet_to_meters,
-                              (11.0 + 9.0/12.0)*feet_to_meters])
+        room_size = np.array([length, width])
         print("room_size = %s" % room_size)
         room_corners = np.array([[0.0, 0.0], room_size])
         print("room_corners = %s" % room_corners)
@@ -72,6 +74,16 @@ class LocationModelWorker:
         material_entity_ids = [entity.entity_id for entity in entities['material']]
         teacher_entity_ids = [entity.entity_id for entity in entities['teacher']]
         area_entity_ids = [entity.entity_id for entity in entities['area']]
+
+        child_sensor_ids = [entity.sensor_id for entity in entities['child']]
+        material_sensor_ids = [entity.sensor_id for entity in entities['material']]
+        teacher_sensor_ids = [entity.sensor_id for entity in entities['teacher']]
+        area_sensor_ids = [entity.sensor_id for entity in entities['area']]
+        self.sensor_ids = (
+            child_sensor_ids +
+            material_sensor_ids +
+            teacher_sensor_ids +
+            area_sensor_ids)
 
         print("child_entity_ids = %s" % child_entity_ids)
         print("material_entity_ids = %s" % material_entity_ids)
@@ -96,8 +108,8 @@ class LocationModelWorker:
         room_center = room_size / 2
         for area_id in area_entity_ids:
             area = areas_by_id.get(area_id)
-            if area and area.position_x and area.position_y:
-                position = [area.position_x, area.position_y]
+            if area and area.x_position and area.y_position:
+                position = [area.x_position, area.y_position]
             else:
                 position = room_center
             area_positions.append(position)
@@ -165,10 +177,10 @@ class LocationModelWorker:
     def publish_to_firebase(self, locations, std_deviations, timestamp):
         batch = self.firebase.batch()
 
-        for ((entity_type, entity_id), (x,y), (x_stddev, y_stddev)) in zip(self.entity_ids, locations, std_deviations):
+        for ((entity_type, entity_id), sensor_id, (x,y), (x_stddev, y_stddev)) in zip(self.entity_ids, self.sensor_ids, locations, std_deviations):
             path = 'classrooms/%s/entity_locations/%s-%s-%s' % (self.classroom_id, entity_type, entity_id, timestamp)
             doc_ref = self.firebase.document(path)
-            print("%s %d: (%f, %f)" % (entity_type, entity_id, x, y))
+            print("%s %d (%d): (%f, %f)" % (entity_type, entity_id, sensor_id, x, y))
             publish_location = {
                 'entityType': u'%s' % entity_type,
                 'entityId': entity_id,
