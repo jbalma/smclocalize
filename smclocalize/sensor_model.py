@@ -108,7 +108,7 @@ class SensorModel(SMCModel):
             self.distances_test_output_tensor = self.create_distances_tensor(
                 self.x_continuous_test_input_tensor)
 
-            self.ping_success_probabilities_test_output_tensor = self.create_ping_success_probabilities_tensor(
+            self.ping_success_probabilities_test_output_tensor, self.ping_failure_probabilities_test_output_tensor = self.create_ping_success_probabilities_tensor(
                 self.x_discrete_test_input_tensor,
                 self.distances_test_input_tensor)
 
@@ -735,7 +735,7 @@ class SensorModel(SMCModel):
         x_discrete_test_input,
         distances_test_input):
         return self.sensor_model_testing_session.run(
-            self.ping_success_probabilities_test_output_tensor,
+            [self.ping_success_probabilities_test_output_tensor, self.ping_failure_probabilities_test_output_tensor],
             feed_dict = {
                 self.x_discrete_test_input_tensor: x_discrete_test_input,
                 self.distances_test_input_tensor: distances_test_input})

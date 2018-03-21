@@ -153,6 +153,19 @@ class SensorVariableStructure(object):
             y_continuous_all_sensors[remote_idx, local_idx] = dataframe.iloc[row]['rssi']
         return y_discrete_all_sensors, y_continuous_all_sensors
 
+    # Parse a dataframe containing a single time step of moving sensor position
+    # data
+    def sensor_x_continuous_data_parse_one_timestep(self, dataframe):
+        x_continuous_all_sensors = np.full(
+            (self.num_sensors, self.num_dimensions),
+            np.nan,
+            dtype='float')
+        for row in range(len(dataframe)):
+            entity_idx = self.entity_id_index.get(dataframe.iloc[row]['entity_type'] + '_' + str(dataframe.iloc[row]['entity_id']))
+            x_continuous_all_sensors[entity_idx, 0] = dataframe.iloc[row]['l']
+            x_continuous_all_sensors[entity_idx, 1] = dataframe.iloc[row]['w']
+        return self.extract_x_variables(x_continuous_all_sensors)
+
     # Parse a dataframe containing multiple time steps of ping data
     def sensor_data_parse_multiple_timesteps(self, dataframe):
         timestamps = np.sort(dataframe['observed_at'].unique())
