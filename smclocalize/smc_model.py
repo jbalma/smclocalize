@@ -39,10 +39,10 @@ class SMCModel(object):
                 tf.float32,
                 shape = (self.num_particles, self.num_x_continuous_vars),
                 name='x_continuous_previous_input')
-            self.log_weights_previous_tensor = tf.placeholder(
-                tf.float32,
+            self.ancestor_indices_tensor = tf.placeholder(
+                tf.int32,
                 shape = (self.num_particles),
-                name='log_weights_previous_input')
+                name='ancestor_indices_input')
             self.t_delta_seconds_tensor = tf.placeholder(
                 tf.float32,
                 shape = (),
@@ -55,10 +55,10 @@ class SMCModel(object):
                 tf.float32,
                 shape = (self.num_y_continuous_vars),
                 name='y_continuous_input')
-            self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor = self.create_next_particles_tensor(
+            self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor = self.create_next_particles_tensor(
                 self.x_discrete_previous_tensor,
                 self.x_continuous_previous_tensor,
-                self.log_weights_previous_tensor,
+                self.ancestor_indices_tensor,
                 self.y_discrete_tensor,
                 self.y_continuous_tensor,
                 self.t_delta_seconds_tensor)
@@ -154,13 +154,11 @@ class SMCModel(object):
         self,
         x_discrete_previous_tensor,
         x_continuous_previous_tensor,
-        log_weights_previous_tensor,
+        ancestor_indices_tensor,
         y_discrete_tensor,
         y_continuous_tensor,
         t_delta_seconds_tensor):
         with tf.name_scope('create_next_particles'):
-            ancestor_indices_tensor = self.create_ancestor_indices_tensor(
-                log_weights_previous_tensor)
             x_discrete_previous_resampled_tensor, x_continuous_previous_resampled_tensor = self.create_resampled_particles_tensor(
                 x_discrete_previous_tensor,
                 x_continuous_previous_tensor,
@@ -196,7 +194,7 @@ class SMCModel(object):
                 log_weights_tensor,
                 [self.num_particles],
                 name='create_log_weights_reshaped')
-        return x_discrete_reshaped_tensor, x_continuous_reshaped_tensor, log_weights_reshaped_tensor, ancestor_indices_reshaped_tensor
+        return x_discrete_reshaped_tensor, x_continuous_reshaped_tensor, log_weights_reshaped_tensor
 
     def create_initial_simulation_timestep_tensor(
         self):
@@ -259,6 +257,9 @@ class SMCModel(object):
                 name='create_y_continuous_reshaped')
         return x_discrete_reshaped_tensor, x_continuous_reshaped_tensor, y_discrete_reshaped_tensor, y_continuous_reshaped_tensor
 
+    # We are not currently using this function because tf.multinomial was
+    # causing memory overflows, but we're keeping it here in case we need it
+    # again
     def create_ancestor_indices_tensor(self, log_weights_previous_tensor):
         with tf.name_scope('create_ancestor_indices'):
             ancestor_indices_tensor = tf.multinomial(
@@ -361,15 +362,24 @@ class SMCModel(object):
             y_continuous,
             (self.num_y_continuous_vars))
         t_delta_seconds = t_delta/np.timedelta64(1, 's')
-        return self.smc_model_session.run(
-            [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor],
+        # Calculate ancestor indices outside of TensorFlow because
+        # tf.multinomial() uses too much memory for logit arrays
+        weights_previous = np.exp(log_weights_previous_reshaped)
+        weights_previous_normalized = weights_previous/np.sum(weights_previous)
+        ancestor_indices = np.int32(np.random.choice(
+            self.num_particles,
+            size=self.num_particles,
+            p=weights_previous_normalized))
+        x_discrete, x_continuous, log_weights =  self.smc_model_session.run(
+            [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor],
             feed_dict = {
                 self.x_discrete_previous_tensor: x_discrete_previous_reshaped,
                 self.x_continuous_previous_tensor : x_continuous_previous_reshaped,
-                self.log_weights_previous_tensor : log_weights_previous_reshaped,
+                self.ancestor_indices_tensor: ancestor_indices,
                 self.y_discrete_tensor: y_discrete_reshaped,
                 self.y_continuous_tensor: y_continuous_reshaped,
                 self.t_delta_seconds_tensor: t_delta_seconds})
+        return x_discrete, x_continuous, log_weights, ancestor_indices
 
     # Generate an entire trajectory of X particles along with their weights and
     # ancestor indices based on an entire trajectory of Y values
@@ -503,17 +513,25 @@ class SMCModel(object):
             y_continuous,
             (self.num_y_continuous_vars))
         t_delta_seconds = t_delta/np.timedelta64(1, 's')
+        # Calculate ancestor indices outside of TensorFlow because
+        # tf.multinomial() uses too much memory for logit arrays
+        weights_previous = np.exp(log_weights_previous_reshaped)
+        weights_previous_normalized = weights_previous/np.sum(weights_previous)
+        ancestor_indices = np.int32(np.random.choice(
+            self.num_particles,
+            size=self.num_particles,
+            p=weights_previous_normalized))
         log_file_writer = tf.summary.FileWriter(
             tensorflow_log_directory,
             self.smc_model_graph)
         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
         run_metadata = tf.RunMetadata()
-        x_discrete, x_continuous, log_weights, ancestor_indices = self.smc_model_session.run(
-            [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor, self.ancestor_indices_tensor],
+        x_discrete, x_continuous, log_weights =  self.smc_model_session.run(
+            [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor],
             feed_dict = {
                 self.x_discrete_previous_tensor: x_discrete_previous_reshaped,
                 self.x_continuous_previous_tensor : x_continuous_previous_reshaped,
-                self.log_weights_previous_tensor : log_weights_previous_reshaped,
+                self.ancestor_indices_tensor: ancestor_indices,
                 self.y_discrete_tensor: y_discrete_reshaped,
                 self.y_continuous_tensor: y_continuous_reshaped,
                 self.t_delta_seconds_tensor: t_delta_seconds},
