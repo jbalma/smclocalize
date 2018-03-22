@@ -10,6 +10,9 @@ import firebase_admin
 from firebase_admin import firestore
 import pytz
 import sensei
+import dateutil.parser
+from datetime import timedelta, datetime
+
 
 
 ModelState = namedtuple("ModelState", "x_discrete_particles x_continuous_particles log_weights")
@@ -22,12 +25,6 @@ class LocationModelWorker:
     def __init__(self, classroom_id, num_particles):
         self.classroom_id = classroom_id
         self.num_particles = num_particles
-
-        redis_url = os.getenv('REDIS_URL')
-        if redis_url is None:
-            raise ConfigError("Missing environment variable REDIS_URL. Please see README.")
-        self.redis_handle = redis.Redis.from_url(redis_url)
-        self.input_queue = 'radio_obs_classroom_%d' % self.classroom_id
 
         firebase_url = os.getenv('FIREBASE_URL')
         if firebase_url is None:
@@ -52,7 +49,7 @@ class LocationModelWorker:
         self.firebase = firebase_admin.firestore.client()
 
         classroom_doc = self.firebase.document('classrooms/%d' % self.classroom_id)
-        classroom_doc_snapshot = classroom_doc.get(['width', 'length'])
+        classroom_doc_snapshot = classroom_doc.get(['width', 'length', 'timezone'])
         width = classroom_doc_snapshot.get('width')
         length = classroom_doc_snapshot.get('length')
         print("Width from firebase = (width:%s, length:%s)" % (width, length))
@@ -63,9 +60,11 @@ class LocationModelWorker:
         room_corners = np.array([[0.0, 0.0], room_size])
         print("room_corners = %s" % room_corners)
 
+        timezone_str = classroom_doc_snapshot.get('timezone')
+        self.timezone = pytz.timezone(timezone_str)
 
-        sensei_api = sensei.Api(username=os.getenv('SENSEI_USERNAME'), password=os.getenv('SENSEI_PASSWORD'))
-        mappings = sensei_api.get_sensor_mappings(classroom_id)
+        self.sensei_api = sensei.Api(username=os.getenv('SENSEI_USERNAME'), password=os.getenv('SENSEI_PASSWORD'))
+        mappings = self.sensei_api.get_sensor_mappings(classroom_id)
         entities = defaultdict(list)
         for mapping in mappings:
             entities[mapping.entity_type.value].append(mapping)
@@ -101,7 +100,7 @@ class LocationModelWorker:
                                                           teacher_entity_ids,
                                                           area_entity_ids)
 
-        areas_by_id = {area.entity_id: area for area in sensei_api.get_areas(classroom_id)}
+        areas_by_id = {area.entity_id: area for area in self.sensei_api.get_areas(classroom_id)}
 
         area_positions = []
 
@@ -124,10 +123,15 @@ class LocationModelWorker:
             self.num_particles)
 
 
-    def run(self):
+    def run_live(self):
         self.model_state = ()
 
-        # Run the model on the first frames
+        redis_url = os.getenv('REDIS_URL')
+        if redis_url is None:
+            raise ConfigError("Missing environment variable REDIS_URL. Please see README.")
+        self.redis_handle = redis.Redis.from_url(redis_url)
+        self.input_queue = 'radio_obs_classroom_%d' % self.classroom_id
+
         previous_frame_valid_time = None
 
         while True:
@@ -142,6 +146,36 @@ class LocationModelWorker:
                 initial_frame = True
             locations = self.process_frame(frame, frame_valid_time, delta_t, initial_frame)
             previous_frame_valid_time = frame_valid_time
+
+    def run_for_date(self, date_str):
+        date = dateutil.parser.parse(date_str)
+        date = self.timezone.localize(date)
+
+        self.model_state = ()
+
+        previous_frame_valid_time = None
+
+        # Fetch data in blocks of one hour
+        for hour in range(8,17):
+            start_time = date.replace(hour=hour, minute=0, second=0, microsecond=0)
+            end_time = start_time + timedelta(hours=1)
+            obs = self.sensei_api.get_radio_observations(self.classroom_id, start_time=start_time, end_time=end_time, json_rep=True)
+            if len(obs) == 0:
+                continue
+            print("%d obs for %s" % (len(obs), start_time))
+            df = pd.DataFrame(obs)
+            df['observed_at'] = pd.to_datetime(df['observed_at'])
+            timestamps = np.sort(df['observed_at'].unique())
+            for frame_valid_time in timestamps:
+                frame = df[df['observed_at'] == frame_valid_time]
+                if previous_frame_valid_time:
+                    delta_t = frame_valid_time - previous_frame_valid_time
+                    initial_frame = False
+                else:
+                    delta_t = 0
+                    initial_frame = True
+                locations = self.process_frame(frame, pd.Timestamp(frame_valid_time), delta_t, initial_frame)
+                previous_frame_valid_time = frame_valid_time
 
     def process_frame(self, frame, frame_valid_time, delta_t, initial_frame = False):
         start_time = time.time()
@@ -198,12 +232,16 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument("-c", "--classroom_id", dest="classroom_id", required=True, type=int, help="Classroom ID")
+    parser.add_argument("-d", "--date", dest="date", type=str, help="If specified, model will run for given date")
     parser.add_argument("-n", "--num_particles", dest="num_particles", type=int, default=10000, help="Number of particles to use in the model")
 
     options = parser.parse_args()
 
     try:
         worker = LocationModelWorker(options.classroom_id, options.num_particles)
-        worker.run()
+        if options.date:
+            worker.run_for_date(options.date)
+        else:
+            worker.run_live()
     except ConfigError as error:
         sys.exit(error)
