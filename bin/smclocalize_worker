@@ -120,7 +120,12 @@ class LocationModelWorker:
             self.variable_structure,
             room_corners,
             fixed_sensor_positions,
-            self.num_particles)
+            self.num_particles,
+            ping_success_probability_zero_distance = 0.5655,
+            receive_probability_reference_distance = 0.007941,
+            rssi_untruncated_mean_intercept = -74.6121,
+            rssi_untruncated_mean_slope = -8.6608,
+            rssi_untruncated_std_dev = 4.570)
 
 
     def run_live(self):
