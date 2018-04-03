@@ -122,61 +122,52 @@ class SensorVariableStructure(object):
     def extract_y_variables(self, a):
         return a[..., self.extract_y_variables_mask]
 
-    # Parse a dataframe containing a single time step of ping data
-    def sensor_data_parse_one_timestep(self, dataframe):
-        y_discrete_all_sensors = np.ones(
-            (self.num_sensors, self.num_sensors),
-            dtype='int')
-        y_continuous_all_sensors = np.zeros(
-            (self.num_sensors, self.num_sensors),
-            dtype='float')
-        for row in range(len(dataframe)):
-            remote_idx = self.entity_id_index.get(dataframe.iloc[row]['remote_type'] + '_' + str(dataframe.iloc[row]['remote_id']))
-            local_idx = self.entity_id_index.get(dataframe.iloc[row]['local_type'] + '_' + str(dataframe.iloc[row]['local_id']))
-            y_discrete_all_sensors[remote_idx, local_idx] = 0
-            y_continuous_all_sensors[remote_idx, local_idx] = dataframe.iloc[row]['rssi']
-        return self.extract_y_variables(y_discrete_all_sensors), self.extract_y_variables(y_continuous_all_sensors)
+    # Parse a dataframe containing a single time step of ping data and arrange
+    # it in the flat format of the Y variables
+    def parse_ping_data(self, dataframe):
+        ping_status_matrix, rssi_matrix = self.parse_ping_data_matrix(
+            dataframe)
+        return self.extract_y_variables(ping_status_matrix), self.extract_y_variables(rssi_matrix)
 
-    # Parse a dataframe containing a single time step of ping data but keep the
-    # data in matrix form
-    def sensor_data_all_sensors_one_timestep(self, dataframe):
-        y_discrete_all_sensors = np.ones(
+    # Parse a dataframe containing a single time step of ping data and arrange
+    # it in matrix form
+    def parse_ping_data_matrix(self, dataframe):
+        ping_status_matrix = np.ones(
             (self.num_sensors, self.num_sensors),
             dtype='int')
-        y_continuous_all_sensors = np.zeros(
+        rssi_matrix = np.zeros(
             (self.num_sensors, self.num_sensors),
             dtype='float')
         for row in range(len(dataframe)):
             remote_idx = self.entity_id_index.get(dataframe.iloc[row]['remote_type'] + '_' + str(dataframe.iloc[row]['remote_id']))
             local_idx = self.entity_id_index.get(dataframe.iloc[row]['local_type'] + '_' + str(dataframe.iloc[row]['local_id']))
-            y_discrete_all_sensors[remote_idx, local_idx] = 0
-            y_continuous_all_sensors[remote_idx, local_idx] = dataframe.iloc[row]['rssi']
-        return y_discrete_all_sensors, y_continuous_all_sensors
+            ping_status_matrix[remote_idx, local_idx] = 0
+            rssi_matrix[remote_idx, local_idx] = dataframe.iloc[row]['rssi']
+        return ping_status_matrix, rssi_matrix
 
     # Parse a dataframe containing a single time step of moving sensor position
-    # data
-    def sensor_x_continuous_data_parse_one_timestep(self, dataframe):
-        x_continuous_all_sensors = np.full(
+    # data and arrange it in the flat format of the X variables
+    def parse_moving_sensor_position_data(self, dataframe):
+        sensor_position_matrix = self.parse_sensor_position_data_matrix(
+            dataframe)
+        return self.extract_x_variables(sensor_position_matrix)
+
+    # Parse a dataframe containing fixed sensor position data and arrange it in
+    # the matrix form required by smc_model
+    def parse_fixed_sensor_position_data(self, dataframe):
+        sensor_position_matrix = self.parse_sensor_position_data_matrix(
+            dataframe)
+        return sensor_position_matrix[-self.num_area_sensors:]
+
+    # Parse a dataframe containing sensor position data and arrange it in matrix
+    # form
+    def parse_sensor_position_data_matrix(self, dataframe):
+        sensor_position_matrix = np.full(
             (self.num_sensors, self.num_dimensions),
             np.nan,
             dtype='float')
         for row in range(len(dataframe)):
             entity_idx = self.entity_id_index.get(dataframe.iloc[row]['entity_type'] + '_' + str(dataframe.iloc[row]['entity_id']))
-            x_continuous_all_sensors[entity_idx, 0] = dataframe.iloc[row]['l']
-            x_continuous_all_sensors[entity_idx, 1] = dataframe.iloc[row]['w']
-        return self.extract_x_variables(x_continuous_all_sensors)
-
-    # Parse a dataframe containing multiple time steps of ping data
-    def sensor_data_parse_multiple_timesteps(self, dataframe):
-        timestamps = np.sort(dataframe['observed_at'].unique())
-        num_timesteps = len(timestamps)
-        y_discrete_t = np.ones(
-            (num_timesteps, self.num_y_discrete_vars),
-            dtype='int')
-        y_continuous_t = np.zeros(
-            (num_timesteps, self.num_y_continuous_vars),
-            dtype='float')
-        for t_index in range(num_timesteps):
-            y_discrete_t[t_index], y_continuous_t[t_index] = self.sensor_data_parse_one_timestep(
-            dataframe[dataframe['observed_at'] == timestamps[t_index]])
-        return y_discrete_t, y_continuous_t, timestamps
+            sensor_position_matrix[entity_idx, 0] = dataframe.iloc[row]['l']
+            sensor_position_matrix[entity_idx, 1] = dataframe.iloc[row]['w']
+        return sensor_position_matrix

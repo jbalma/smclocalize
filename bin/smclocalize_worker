@@ -180,7 +180,7 @@ class LocationModelWorker:
     def process_frame(self, frame, frame_valid_time, delta_t, initial_frame = False):
         start_time = time.time()
         print("Processing frame %s" % frame_valid_time)
-        y_discrete, y_continuous = self.variable_structure.sensor_data_parse_one_timestep(frame)
+        y_discrete, y_continuous = self.variable_structure.parse_ping_data(frame)
         if initial_frame:
             self.state = ModelState(*self.sensor_model.generate_initial_particles(y_discrete, y_continuous))
         else:
