@@ -107,10 +107,7 @@ class LocationModelWorker:
         room_center = room_size / 2
         for area_id in area_entity_ids:
             area = areas_by_id.get(area_id)
-            if area and area.x_position and area.y_position:
-                position = [area.x_position, area.y_position]
-            else:
-                position = room_center
+            position = [area.x_position, area.y_position]
             area_positions.append(position)
 
         fixed_sensor_positions = np.array(area_positions)
