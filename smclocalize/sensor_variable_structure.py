@@ -68,13 +68,13 @@ class SensorVariableStructure(object):
         self.extract_y_variables_mask[
             self.num_moving_sensors:,
             self.num_moving_sensors:] = False
-        # We don't store pings from material sensors to area sensors (and vice versa)
-        self.extract_y_variables_mask[
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
-            self.num_moving_sensors:] = False
-        self.extract_y_variables_mask[
-            self.num_moving_sensors:,
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)] = False
+        # We *do* now store pings from material sensors to area sensors (and vice versa)
+        # self.extract_y_variables_mask[
+        #     self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
+        #     self.num_moving_sensors:] = False
+        # self.extract_y_variables_mask[
+        #     self.num_moving_sensors:,
+        #     self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)] = False
 
         # Define the number of discrete and continuous Y variables using this
         # mask.
