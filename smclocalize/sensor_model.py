@@ -32,7 +32,11 @@ class SensorModel(SMCModel):
         rssi_untruncated_mean_intercept = -69.18,
         rssi_untruncated_mean_slope = -20.0,
         rssi_untruncated_std_dev = 5.70,
-        lower_rssi_cutoff = -96.0001):
+        lower_rssi_cutoff = -96.0001,
+        child_sensor_attenuation_factor = 0.0,
+        material_sensor_attenuation_factor = 0.0,
+        teacher_sensor_attenuation_factor = 0.0,
+        area_sensor_attenuation_factor = 0.0):
         self.sensor_variable_structure = sensor_variable_structure
         self.room_corners = room_corners
         self.fixed_sensor_positions = fixed_sensor_positions
@@ -50,10 +54,23 @@ class SensorModel(SMCModel):
         self.rssi_untruncated_mean_slope = rssi_untruncated_mean_slope
         self.rssi_untruncated_std_dev = rssi_untruncated_std_dev
         self.lower_rssi_cutoff = lower_rssi_cutoff
+        self.child_sensor_attenuation_factor = child_sensor_attenuation_factor
+        self.material_sensor_attenuation_factor = material_sensor_attenuation_factor
+        self.teacher_sensor_attenuation_factor = teacher_sensor_attenuation_factor
+        self.area_sensor_attenuation_factor = area_sensor_attenuation_factor
 
         self.reference_time_delta_seconds = reference_time_delta/np.timedelta64(1, 's')
         self.scale_factor = self.reference_distance/np.log(self.receive_probability_reference_distance/self.ping_success_probability_zero_distance)
         self.norm_exponent_factor = -1/(2*self.rssi_untruncated_std_dev**2)
+        self.attenuation_factor_vector = np.concatenate([
+            np.repeat(self.child_sensor_attenuation_factor, sensor_variable_structure.num_child_sensors),
+            np.repeat(self.material_sensor_attenuation_factor, sensor_variable_structure.num_material_sensors),
+            np.repeat(self.teacher_sensor_attenuation_factor, sensor_variable_structure.num_teacher_sensors),
+            np.repeat(self.area_sensor_attenuation_factor, sensor_variable_structure.num_area_sensors)])
+        self.attenuation_factor_matrix = np.add(
+            np.expand_dims(self.attenuation_factor_vector, 0),
+            np.expand_dims(self.attenuation_factor_vector, 1))
+        self.attenuation_factor = sensor_variable_structure.extract_y_variables(self.attenuation_factor_matrix)
 
         # Call the constructor for the parent class to initialize variables and
         # create the computational graph that we will use in all calculations
@@ -692,17 +709,24 @@ class SensorModel(SMCModel):
                 self.rssi_untruncated_mean_slope,
                 dtype=tf.float32,
                 name='rssi_untruncated_mean_slope')
+            attenuation_factor_tensor = tf.constant(
+                self.attenuation_factor,
+                dtype=tf.float32,
+                name='attenuation_factor')
             # Calculate untruncted means of RSSI distributions
             rssi_untruncated_mean_tensor = tf.add(
-                rssi_untruncated_mean_intercept_tensor,
-                tf.multiply(
-                    rssi_untruncated_mean_slope_tensor,
-                    tf.divide(
-                        tf.log(distances_tensor),
-                        tf.constant(np.log(10.0), dtype=tf.float32),
-                        name='calc_log_10_distances'),
-                    name='multiply_log_distances_by_slope'),
-                name='create_rssi_untruncated_mean')
+                tf.add(
+                    rssi_untruncated_mean_intercept_tensor,
+                    tf.multiply(
+                        rssi_untruncated_mean_slope_tensor,
+                        tf.divide(
+                            tf.log(distances_tensor),
+                            tf.constant(np.log(10.0), dtype=tf.float32),
+                            name='calc_log_10_distances'),
+                        name='multiply_log_distances_by_slope'),
+                    name='create_unattenuated_rssi_untruncated_mean'),
+                attenuation_factor_tensor,
+                name = 'create_unattenuated_rssi_untruncated_mean')
         return rssi_untruncated_mean_tensor
 
     # These functions are just used for testing the functions above
