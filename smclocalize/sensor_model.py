@@ -261,10 +261,10 @@ class SensorModel(SMCModel):
                 tf.reshape(
                     tf.py_func(
                         stats.truncnorm.rvs,
-                        [room_min_scaled,
-                        room_max_scaled,
-                        x_continuous_previous_tensor,
-                        moving_sensor_drift_tensor],
+                        [tf.Print(room_min_scaled, [room_min_scaled], "\nroom_min_scaled: ", summarize=10),
+                        tf.Print(room_max_scaled, [room_max_scaled], "\nroom_max_scaled: ", summarize=10),
+                        tf.Print(x_continuous_previous_tensor, [x_continuous_previous_tensor], "\nx_continuous_previous_tensor: ", summarize=10),
+                        tf.Print(moving_sensor_drift_tensor, [moving_sensor_drift_tensor], "\nmoving_sensor_drift_tensor: ", summarize=10)],
                         tf.float64,
                         name='create_x_continuous_sample'),
                     tf.shape(x_continuous_previous_tensor),
