@@ -37,6 +37,9 @@ class SensorVariableStructure(object):
         self.num_fixed_sensors = self.num_area_sensors
         self.num_sensors = self.num_moving_sensors + self.num_fixed_sensors
 
+        if not self.num_fixed_sensors > 0:
+            raise Exception('Number of fixed sensors is not greater than zero')
+
         # Define a Boolean mask which helps us extract and flatten X values from
         # an array representing sensor positions. Start with an
         # array that has a row for every sensor and a column for every spatial
