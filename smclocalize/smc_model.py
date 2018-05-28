@@ -320,17 +320,30 @@ class SMCModel(object):
         self,
         y_discrete_initial,
         y_continuous_initial):
+        if np.any(np.isnan(y_discrete_initial)):
+            raise Exception('Some initial y discrete values are NaN')
+        if np.any(np.isnan(y_continuous_initial)):
+            raise Exception('Some initial y continuous values are NaN')
         y_discrete_initial_reshaped = np.reshape(
             y_discrete_initial,
             (self.num_y_discrete_vars))
         y_continuous_initial_reshaped = np.reshape(
             y_continuous_initial,
             (self.num_y_continuous_vars))
-        return self.smc_model_session.run(
+        x_discrete_initial, x_continuous_initial, log_weights_initial =  self.smc_model_session.run(
             [self.x_discrete_initial_tensor, self.x_continuous_initial_tensor, self.log_weights_initial_tensor],
             feed_dict = {
                 self.y_discrete_initial_tensor: y_discrete_initial_reshaped,
                 self.y_continuous_initial_tensor : y_continuous_initial_reshaped})
+        if np.any(np.isnan(x_discrete_initial)):
+            raise Exception('Some initial x discrete values are NaN')
+        if np.any(np.isnan(x_continuous_initial)):
+            raise Exception('Some initial x continuous values are NaN')
+        if np.any(np.isnan(log_weights_initial)):
+            raise Exception('Some initial log weights are NaN')
+        if np.all(np.isneginf(log_weights_initial)):
+            raise Exception('All initial log weights are negative infinite')
+        return x_discrete_initial, x_continuous_initial, log_weights_initial
 
     # Generate a set of X particles and weights (along with indices which point
     # to their ancestors) for the current time step based on the set of
@@ -344,8 +357,20 @@ class SMCModel(object):
         y_discrete,
         y_continuous,
         t_delta):
-        if np.all(np.logical_not(np.isfinite(log_weights_previous))):
-            raise Exception('All particles have zero weight.')
+        if np.any(np.isnan(x_discrete_previous)):
+            raise Exception('Some previous x discrete values are NaN')
+        if np.any(np.isnan(x_continuous_previous)):
+            raise Exception('Some previous x continuous values are NaN')
+        if np.any(np.isnan(log_weights_previous)):
+            raise Exception('Some previous log weights are NaN')
+        if np.any(np.isnan(y_discrete)):
+            raise Exception('Some y discrete values are NaN')
+        if np.any(np.isnan(y_continuous)):
+            raise Exception('Some y continuous values are NaN')
+        if np.all(np.isneginf(log_weights_previous)):
+            raise Exception('All previous log weights are negative infinite')
+        if t_delta == 0:
+            raise Exception('Time delta is zero')
         x_discrete_previous_reshaped = np.reshape(
             x_discrete_previous,
             (self.num_particles, self.num_x_discrete_vars))
@@ -365,11 +390,18 @@ class SMCModel(object):
         # Calculate ancestor indices outside of TensorFlow because
         # tf.multinomial() uses too much memory for logit arrays
         weights_previous = np.exp(log_weights_previous_reshaped)
-        weights_previous_normalized = weights_previous/np.sum(weights_previous)
+        weights_previous_sum = np.sum(weights_previous)
+        if weights_previous_sum == 0:
+            raise Exception('Sum of previous weights is zero')
+        weights_previous_normalized = weights_previous/weights_previous_sum
+        if np.any(np.isnan(weights_previous_normalized)):
+            raise Exception('After normalization, some previous weights are NaN')
         ancestor_indices = np.int32(np.random.choice(
             self.num_particles,
             size=self.num_particles,
             p=weights_previous_normalized))
+        if np.any(np.isnan(ancestor_indices)):
+            raise Exception('Some ancestor indices are NaN')
         x_discrete, x_continuous, log_weights =  self.smc_model_session.run(
             [self.x_discrete_tensor, self.x_continuous_tensor, self.log_weights_tensor],
             feed_dict = {
@@ -379,6 +411,14 @@ class SMCModel(object):
                 self.y_discrete_tensor: y_discrete_reshaped,
                 self.y_continuous_tensor: y_continuous_reshaped,
                 self.t_delta_seconds_tensor: t_delta_seconds})
+        if np.any(np.isnan(x_discrete)):
+            raise Exception('Some x discrete values are NaN')
+        if np.any(np.isnan(x_continuous)):
+            raise Exception('Some x continuous values are NaN')
+        if np.any(np.isnan(log_weights)):
+            raise Exception('Some log weights are NaN')
+        if np.all(np.isneginf(log_weights)):
+            raise Exception('All log weights are negative infinite')
         return x_discrete, x_continuous, log_weights, ancestor_indices
 
     # Generate an entire trajectory of X particles along with their weights and
