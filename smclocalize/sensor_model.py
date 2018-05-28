@@ -33,6 +33,40 @@ class SensorModel(SMCModel):
         rssi_untruncated_mean_slope = -20.0,
         rssi_untruncated_std_dev = 5.70,
         lower_rssi_cutoff = -96.0001):
+        if not sensor_variable_structure.num_fixed_sensors > 0:
+            raise Exception("Number of fixed sensors in sensor variable structure not greater than zero")
+        if np.array(room_corners).shape[0] != 2:
+            raise Exception("Number of room corners not equal to two")
+        if np.array(room_corners).shape[1] != sensor_variable_structure.num_dimensions:
+            raise Exception("Number of dimensions in room corner specification not equal to number of dimensions in sensor variable structure")
+        if np.array(fixed_sensor_positions).shape[0] != sensor_variable_structure.num_fixed_sensors:
+            raise Exception('Number of specified fixed sensor positions not equal to number of fixed sensors in sensor variable structure')
+        if np.array(fixed_sensor_positions).shape[1] != sensor_variable_structure.num_dimensions:
+            raise Exception('Number of dimensions on fixed sensor position specification not equal to number of dimensions in sensor variable structure')
+        if not initial_status_on_probability >= 0 or not initial_status_on_probability <= 1:
+            raise Exception('Initial status on probability is not between zero and one')
+        if not status_on_to_off_probability >= 0 or not status_on_to_off_probability <= 1:
+            raise Exception('Status on to status off probability is not between zero and one')
+        if not status_off_to_on_probability >= 0 or not status_off_to_on_probability <= 1:
+            raise Exception('Status off to status on probability is not between zero and one')
+        if not ping_success_probability_sensor_on >= 0 or not ping_success_probability_sensor_on <= 1:
+            raise Exception('Ping success probability when sensor is on is not between zero and one')
+        if not ping_success_probability_sensor_off >= 0 or not ping_success_probability_sensor_off <= 1:
+            raise Exception('Ping success probability when sensor is off is not between zero and one')
+        if not moving_sensor_drift_reference >= 0:
+            raise Exception('Moving sensor drift reference distance is not greater than zero')
+        if not reference_time_delta >= np.timedelta64(0, 's'):
+            raise Exception('Reference delta time is not greater than zero')
+        if not ping_success_probability_zero_distance >= 0 or not ping_success_probability_zero_distance <= 1:
+            raise Exception('Ping success probability at zero distance is not between zero and one')
+        if not receive_probability_reference_distance >= 0 or not receive_probability_reference_distance <= 1:
+            raise Exception('Ping success probability at reference distance is not between zero and one')
+        if not reference_distance >= 0:
+            raise Exception('Reference distance for ping success probability not greater than zero')
+        if not rssi_untruncated_mean_slope < 0:
+            raise Exception('Slope of RSSI untruncated mean with respect to (log) distance is not less than zero')
+        if not rssi_untruncated_std_dev > 0:
+            raise Exception('Standard deviation of RSSI not greater than zero')
         self.sensor_variable_structure = sensor_variable_structure
         self.room_corners = room_corners
         self.fixed_sensor_positions = fixed_sensor_positions

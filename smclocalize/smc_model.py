@@ -369,8 +369,8 @@ class SMCModel(object):
             raise Exception('Some y continuous values are NaN')
         if np.all(np.isneginf(log_weights_previous)):
             raise Exception('All previous log weights are negative infinite')
-        if t_delta == 0:
-            raise Exception('Time delta is zero')
+        if not t_delta > np.timedelta64(0, 's'):
+            raise Exception('Time delta is not greater than zero')
         x_discrete_previous_reshaped = np.reshape(
             x_discrete_previous,
             (self.num_particles, self.num_x_discrete_vars))
