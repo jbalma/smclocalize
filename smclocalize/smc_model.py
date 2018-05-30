@@ -87,7 +87,7 @@ class SMCModel(object):
         self.smc_model_session = tf.Session(graph = self.smc_model_graph)
 
         # Create a debugging version of this session which invokes tfdbg
-        self.smc_model_session_debug = tf_debug.LocalCLIDebugWrapperSession(self.smc_model_session)
+        #self.smc_model_session_debug = tf_debug.LocalCLIDebugWrapperSession(self.smc_model_session)
 
     # Functions which should come from the child class. These specify the
     # probability distributions which define the specific model we're working

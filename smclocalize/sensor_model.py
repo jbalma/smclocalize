@@ -32,7 +32,7 @@ class SensorModel(SMCModel):
         rssi_untruncated_mean_intercept = -69.18,
         rssi_untruncated_mean_slope = -20.0,
         rssi_untruncated_std_dev = 5.70,
-        lower_rssi_cutoff = -100.0001):
+        lower_rssi_cutoff = -96.0001):
         if not sensor_variable_structure.num_fixed_sensors > 0:
             raise Exception("Number of fixed sensors in sensor variable structure not greater than zero")
         if np.array(room_corners).shape[0] != 2:
@@ -295,10 +295,10 @@ class SensorModel(SMCModel):
                 tf.reshape(
                     tf.py_func(
                         stats.truncnorm.rvs,
-                        [tf.Print(room_min_scaled, [room_min_scaled], "\nroom_min_scaled: ", first_n = 1, summarize=10),
-                        tf.Print(room_max_scaled, [room_max_scaled], "\nroom_max_scaled: ", first_n = 1, summarize=10),
-                        tf.Print(x_continuous_previous_tensor, [x_continuous_previous_tensor], "\nx_continuous_previous_tensor: ", first_n = 1, summarize=10),
-                        tf.Print(moving_sensor_drift_tensor, [moving_sensor_drift_tensor], "\nmoving_sensor_drift_tensor: ", first_n = 1, summarize=10)],
+                        [room_min_scaled,
+                        room_max_scaled,
+                        x_continuous_previous_tensor,
+                        moving_sensor_drift_tensor],
                         tf.float64,
                         name='create_x_continuous_sample'),
                     tf.shape(x_continuous_previous_tensor),
@@ -311,8 +311,8 @@ class SensorModel(SMCModel):
         self,
         x_discrete_tensor,
         x_continuous_tensor,
-        y_discrete_tensor,
-        y_continuous_tensor):
+        y_discrete_unfiltered_tensor,
+        y_continuous_unfiltered_tensor):
         with tf.name_scope('create_y_bar_x_log_pdf'):
             # Convert sensor model values to tensors
             rssi_untruncated_std_dev_tensor = tf.constant(
@@ -323,6 +323,10 @@ class SensorModel(SMCModel):
                 self.lower_rssi_cutoff,
                 dtype=tf.float32,
                 name='lower_rssi_cutoff')
+            # Filter outliers out of y tensors
+            y_discrete_tensor, y_continuous_tensor = self.create_filtered_y_tensor(
+                y_discrete_unfiltered_tensor,
+                y_continuous_unfiltered_tensor)
             # Calculate inter-sensor distances
             distances_tensor = self.create_distances_tensor(
                 x_continuous_tensor)
@@ -499,6 +503,33 @@ class SensorModel(SMCModel):
 
     # These functions do not appear in the parent class. They are used by the
     # functions above
+
+    def create_filtered_y_tensor(
+        self,
+        y_discrete_tensor,
+        y_continuous_tensor):
+        with tf.name_scope('create_filtered_y'):
+            outlier_boolean_tensor = tf.less(
+                y_continuous_tensor,
+                self.lower_rssi_cutoff,
+                name='create_outlier_boolean')
+            y_discrete_filtered_tensor = tf.where(
+                outlier_boolean_tensor,
+                tf.ones_like(
+                    y_discrete_tensor,
+                    tf.int32,
+                    name='ones_like_y_discrete'),
+                y_discrete_tensor,
+                name='filter_y_discrete')
+            y_continuous_filtered_tensor = tf.where(
+                outlier_boolean_tensor,
+                tf.zeros_like(
+                    y_continuous_tensor,
+                    tf.float32,
+                    name='zeros_like_y_continuous'),
+                y_continuous_tensor,
+                name='filter_y_continuous')
+        return y_discrete_filtered_tensor, y_continuous_filtered_tensor
 
     def create_distances_tensor(self, x_continuous_tensor):
         with tf.name_scope('create_distances'):
