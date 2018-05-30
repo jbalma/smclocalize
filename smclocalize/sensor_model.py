@@ -32,7 +32,7 @@ class SensorModel(SMCModel):
         rssi_untruncated_mean_intercept = -69.18,
         rssi_untruncated_mean_slope = -20.0,
         rssi_untruncated_std_dev = 5.70,
-        lower_rssi_cutoff = -96.0001):
+        lower_rssi_cutoff = -100.0001):
         if not sensor_variable_structure.num_fixed_sensors > 0:
             raise Exception("Number of fixed sensors in sensor variable structure not greater than zero")
         if np.array(room_corners).shape[0] != 2:
