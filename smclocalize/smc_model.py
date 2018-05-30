@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from tensorflow.python import debug as tf_debug
 
 # Define a class for a generic sequential Monte Carlo (AKA state space) model
 class SMCModel(object):
@@ -83,6 +84,9 @@ class SMCModel(object):
                 self.t_delta_seconds_sim_tensor)
         # Initialize session with this graph
         self.smc_model_session = tf.Session(graph = self.smc_model_graph)
+
+        # Create a debugging version of this session which invokes tfdbg
+        self.smc_model_session_debug = tf_debug.LocalCLIDebugWrapperSession(self.smc_model_session)
 
     # Functions which should come from the child class. These specify the
     # probability distributions which define the specific model we're working
@@ -335,6 +339,11 @@ class SMCModel(object):
             feed_dict = {
                 self.y_discrete_initial_tensor: y_discrete_initial_reshaped,
                 self.y_continuous_initial_tensor : y_continuous_initial_reshaped})
+        # x_discrete_initial, x_continuous_initial, log_weights_initial =  self.smc_model_session_debug.run(
+        #     [self.x_discrete_initial_tensor, self.x_continuous_initial_tensor, self.log_weights_initial_tensor],
+        #     feed_dict = {
+        #         self.y_discrete_initial_tensor: y_discrete_initial_reshaped,
+        #         self.y_continuous_initial_tensor : y_continuous_initial_reshaped})
         if np.any(np.isnan(x_discrete_initial)):
             raise Exception('Some initial x discrete values are NaN')
         if np.any(np.isnan(x_continuous_initial)):
@@ -416,6 +425,19 @@ class SMCModel(object):
         if np.any(np.isnan(x_continuous)):
             raise Exception('Some x continuous values are NaN')
         if np.any(np.isnan(log_weights)):
+            print("Dumping input and output objects...")
+            with open('error_dump.pkl', 'w+b') as file_handle:
+                pickle.dump(
+                    {'x_discrete_previous': x_discrete_previous,
+                    'x_continuous_previous': x_continuous_previous,
+                    'log_weights_previous': log_weights_previous,
+                    'y_discrete': y_discrete,
+                    'y_continuous': y_continuous,
+                    't_delta': t_delta,
+                    'x_discrete': x_discrete,
+                    'x_continuous': x_continuous,
+                    'log_weights': log_weights},
+                    file_handle)
             raise Exception('Some log weights are NaN')
         if np.all(np.isneginf(log_weights)):
             raise Exception('All log weights are negative infinite')
