@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.python import debug as tf_debug
+import pickle
 
 # Define a class for a generic sequential Monte Carlo (AKA state space) model
 class SMCModel(object):
