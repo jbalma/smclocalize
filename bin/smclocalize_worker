@@ -14,6 +14,10 @@ import dateutil.parser
 from datetime import timedelta, datetime
 
 
+pd.set_option('display.height', 1000)
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
 
 ModelState = namedtuple("ModelState", "x_discrete_particles x_continuous_particles log_weights")
 
@@ -22,9 +26,10 @@ class ConfigError(ValueError):
 
 
 class LocationModelWorker:
-    def __init__(self, classroom_id, num_particles):
+    def __init__(self, classroom_id, num_particles, verbose):
         self.classroom_id = classroom_id
         self.num_particles = num_particles
+        self.verbose = verbose
 
         firebase_url = os.getenv('FIREBASE_URL')
         if firebase_url is None:
@@ -177,6 +182,8 @@ class LocationModelWorker:
     def process_frame(self, frame, frame_valid_time, delta_t, initial_frame = False):
         start_time = time.time()
         print("Processing frame %s" % frame_valid_time)
+        if self.verbose:
+            print(frame)
         y_discrete, y_continuous = self.variable_structure.parse_ping_data(frame)
         if initial_frame:
             self.state = ModelState(*self.sensor_model.generate_initial_particles(y_discrete, y_continuous))
@@ -231,11 +238,12 @@ if __name__ == '__main__':
     parser.add_argument("-c", "--classroom_id", dest="classroom_id", required=True, type=int, help="Classroom ID")
     parser.add_argument("-d", "--date", dest="date", type=str, help="If specified, model will run for given date")
     parser.add_argument("-n", "--num_particles", dest="num_particles", type=int, default=10000, help="Number of particles to use in the model")
+    parser.add_argument("-v", "--verbose", action="store_true", help="print each frame")
 
     options = parser.parse_args()
 
     try:
-        worker = LocationModelWorker(options.classroom_id, options.num_particles)
+        worker = LocationModelWorker(options.classroom_id, options.num_particles, options.verbose)
         if options.date:
             worker.run_for_date(options.date)
         else:
