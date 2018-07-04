@@ -37,6 +37,9 @@ class SensorVariableStructure(object):
         self.num_fixed_sensors = self.num_area_sensors
         self.num_sensors = self.num_moving_sensors + self.num_fixed_sensors
 
+        if not self.num_fixed_sensors > 0:
+            raise Exception('Number of fixed sensors is not greater than zero')
+
         # Define a Boolean mask which helps us extract and flatten X values from
         # an array representing sensor positions. Start with an
         # array that has a row for every sensor and a column for every spatial
@@ -68,13 +71,13 @@ class SensorVariableStructure(object):
         self.extract_y_variables_mask[
             self.num_moving_sensors:,
             self.num_moving_sensors:] = False
-        # We don't store pings from material sensors to area sensors (and vice versa)
-        self.extract_y_variables_mask[
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
-            self.num_moving_sensors:] = False
-        self.extract_y_variables_mask[
-            self.num_moving_sensors:,
-            self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)] = False
+        # We *do* now store pings from material sensors to area sensors (and vice versa)
+        # self.extract_y_variables_mask[
+        #     self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors),
+        #     self.num_moving_sensors:] = False
+        # self.extract_y_variables_mask[
+        #     self.num_moving_sensors:,
+        #     self.num_child_sensors:(self.num_child_sensors + self.num_material_sensors)] = False
 
         # Define the number of discrete and continuous Y variables using this
         # mask.
