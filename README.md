@@ -2,11 +2,10 @@
 
 These are various files related to the problem of localizing sensors based on sensor data.
 
-
-## worker.py
+## bin/smclocalize_worker
 
 This runs the locations model, reading in sensor observation frames from redis,
-and posting locations to firebase.
+and posting locations to firebase.  Must be run on a GPU accelerated machine.
 
 A number of environment variables must be set. In a production environment, the
 environment will likely provide a way to set this.  Outside of a production
@@ -38,4 +37,4 @@ To set the environment variables from the file, `source .myenv`
 
 ### Running the worker
 
-`./worker.py -c 735`
+`./bin/smclocalize_worker -c 735`
