@@ -15,9 +15,5 @@ setup(name='smclocalize',
           'numpy>=1.14',
           'scipy>=1.0',
           'pandas>=0.22',
-          'matplotlib>=2.1',
-          'jupyter>=1.0.0',
-          'tensorflow>=1.5',
-          'firebase-admin==2.8.0',
-          'redis==2.10.6'
+          'tensorflow>=1.5'
       ])
