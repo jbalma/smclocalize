@@ -10,7 +10,6 @@ setup(name='smclocalize',
       author_email='ted.quinn@wildflowerschools.org',
       license='MIT',
       packages=['smclocalize'],
-      scripts=['bin/smclocalize_worker'],
       install_requires=[
           'numpy>=1.14',
           'scipy>=1.0',
