@@ -163,7 +163,15 @@ class SensorModel(SMCModel):
                 self.y_discrete_test_input_tensor,
                 self.y_continuous_test_input_tensor)
 
-        self.sensor_model_testing_session = tf.Session(graph = self.sensor_model_testing_graph)
+        config = tf.ConfigProto(intra_op_parallelism_threads=2,inter_op_parallelism_threads=2,log_device_placement=True )
+        config.gpu_options.allow_growth = True
+        #config.gpu_options.force_gpu_compatible=True
+        #config.gpu_options.per_process_gpu_memory_fraction = 0.99
+        config.Experimental.num_dev_to_dev_copy_streams = 3
+        #config.fetch_skip_sync = True
+
+        # Initialize session with this graph
+        self.sensor_model_testing_session = tf.Session(graph = self.sensor_model_testing_graph, config=config)
 
     # These functions implement the probability distributions which define our
     # specific sensor localization model. These functions are used by the parent

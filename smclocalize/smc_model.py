@@ -83,8 +83,18 @@ class SMCModel(object):
                 self.x_discrete_previous_sim_tensor,
                 self.x_continuous_previous_sim_tensor,
                 self.t_delta_seconds_sim_tensor)
+
+        config = tf.ConfigProto(intra_op_parallelism_threads=2,inter_op_parallelism_threads=2,log_device_placement=True )
+        config.gpu_options.allow_growth = True
+        #config.gpu_options.force_gpu_compatible=True
+        #config.gpu_options.per_process_gpu_memory_fraction = 0.99
+        config.Experimental.num_dev_to_dev_copy_streams = 3
+        #config.graph_options.enable_bfloat16_sendrecv=True
+        #config.Experimental.fetch_skip_sync=False
+        #config.fetch_skip_sync = True
+        #print("config=", config.gpu_options, config.graph_options, config.Experimental)
         # Initialize session with this graph
-        self.smc_model_session = tf.Session(graph = self.smc_model_graph)
+        self.smc_model_session = tf.Session(graph = self.smc_model_graph,config=config)
 
         # Create a debugging version of this session which invokes tfdbg
         #self.smc_model_session_debug = tf_debug.LocalCLIDebugWrapperSession(self.smc_model_session)
@@ -366,7 +376,7 @@ class SMCModel(object):
         log_weights_previous,
         y_discrete,
         y_continuous,
-        t_delta):
+        t_delta, ancestor_indices):
         if np.any(np.isnan(x_discrete_previous)):
             raise Exception('Some previous x discrete values are NaN')
         if np.any(np.isnan(x_continuous_previous)):
@@ -406,10 +416,10 @@ class SMCModel(object):
         weights_previous_normalized = weights_previous/weights_previous_sum
         if np.any(np.isnan(weights_previous_normalized)):
             raise Exception('After normalization, some previous weights are NaN')
-        ancestor_indices = np.int32(np.random.choice(
-            self.num_particles,
-            size=self.num_particles,
-            p=weights_previous_normalized))
+        #ancestor_indices = np.int32(np.random.choice(
+        #    self.num_particles,
+        #    size=self.num_particles,
+        #    p=weights_previous_normalized))
         if np.any(np.isnan(ancestor_indices)):
             raise Exception('Some ancestor indices are NaN')
         x_discrete, x_continuous, log_weights =  self.smc_model_session.run(
